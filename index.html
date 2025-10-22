@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Credly Badge Processor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Credly Badge Processor</h1>
+            <p class="subtitle">Download and process your Credly badges with custom dimensions</p>
+        </header>
+
+        <main>
+            <section class="input-section">
+                <div class="input-group">
+                    <label for="profile-url">Credly Profile URL</label>
+                    <input
+                        type="text"
+                        id="profile-url"
+                        placeholder="https://www.credly.com/users/your-username"
+                        aria-label="Credly profile URL"
+                    >
+                </div>
+
+                <div class="dimensions-group">
+                    <div class="input-group">
+                        <label for="width">Width (px)</label>
+                        <input type="number" id="width" value="512" min="1" max="2048">
+                    </div>
+                    <div class="input-group">
+                        <label for="height">Height (px)</label>
+                        <input type="number" id="height" value="254" min="1" max="2048">
+                    </div>
+                </div>
+
+                <button id="fetch-btn" class="primary-btn">
+                    <span class="btn-text">Fetch Badges</span>
+                    <span class="spinner" style="display: none;"></span>
+                </button>
+
+                <div id="error-message" class="error" style="display: none;"></div>
+                <div id="info-message" class="info" style="display: none;"></div>
+            </section>
+
+            <section id="results-section" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h2>Your Badges <span id="badge-count"></span></h2>
+                    <button id="download-all-btn" class="secondary-btn">Download All as ZIP</button>
+                </div>
+
+                <div id="badges-grid" class="badges-grid"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>
+                This tool processes Credly badges client-side in your browser.
+                No data is sent to any server (except via CORS proxy for API calls).
+            </p>
+            <p>
+                <a href="https://github.com/maltewilhelm/credly-scraper" target="_blank">View on GitHub</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

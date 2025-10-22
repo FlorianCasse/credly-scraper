@@ -1,8 +1,39 @@
-# Credly Badge Downloader
+# Credly Badge Processor
+
+Download and process your Credly badges with custom dimensions - available as both a **web app** and **command-line tool**.
+
+## 🌐 Web App (Recommended)
+
+**Try it now:** [https://maltewilhelm.github.io/credly-scraper](https://maltewilhelm.github.io/credly-scraper)
+
+The web app runs entirely in your browser - no installation required!
+
+> **Note:** The app uses CORS proxies to fetch data from Credly's API since direct browser requests are blocked by CORS policies. Once deployed on GitHub Pages, the app will try direct requests first, falling back to proxies if needed.
+
+### Features
+
+- ✨ No installation needed - runs in your browser
+- 🔒 100% client-side processing - your data never leaves your device
+- 📦 Download individual badges or all as a ZIP file
+- 🎨 Customizable output dimensions (default: 512x254px)
+- 🖼️ Automatic image resizing and centering with transparent background
+- 📱 Responsive design - works on desktop and mobile
+
+### How to Use the Web App
+
+1. Visit the web app URL
+2. Paste your Credly profile URL (e.g., `https://www.credly.com/users/your-username`)
+3. Optionally adjust the output dimensions
+4. Click "Fetch Badges"
+5. Download individual badges or all as a ZIP file
+
+---
+
+## 💻 Command-Line Tool (macOS)
 
 A shell script for macOS that downloads all badges from a Credly profile, performs OCR to extract badge names, and processes the images to a standardized format.
 
-## Features
+### Features
 
 - Downloads all badges from a Credly user profile
 - Performs OCR on badge images to extract text
