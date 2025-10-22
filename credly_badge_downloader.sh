@@ -85,12 +85,14 @@ fetch_badges() {
     local username="$1"
     local page=1
     local per_page=100
-    local all_badges=()
 
-    print_info "Fetching badges for user: $username"
+    print_info "Fetching badges for user: $username" >&2
+
+    # Build a complete JSON array by collecting all pages
+    local all_badges_json="[]"
 
     while true; do
-        print_info "Fetching page $page..."
+        print_info "Fetching page $page..." >&2
 
         # Credly API endpoint
         local api_url="https://www.credly.com/users/${username}/badges.json?page=${page}&per_page=${per_page}"
@@ -100,23 +102,23 @@ fetch_badges() {
         # Check if response is valid JSON
         if ! echo "$response" | jq empty 2>/dev/null; then
             if [ $page -eq 1 ]; then
-                print_error "Failed to fetch badges. User may not exist or profile is private."
+                print_error "Failed to fetch badges. User may not exist or profile is private." >&2
                 exit 1
             else
                 break
             fi
         fi
 
-        # Extract badges from response
-        local badges=$(echo "$response" | jq -r '.data[]? | @json' 2>/dev/null || echo "")
+        # Extract badges from this page
+        local page_badges=$(echo "$response" | jq '.data // []')
+        local badge_count=$(echo "$page_badges" | jq 'length')
 
-        if [ -z "$badges" ]; then
+        if [ "$badge_count" -eq 0 ]; then
             break
         fi
 
-        while IFS= read -r badge; do
-            all_badges+=("$badge")
-        done <<< "$badges"
+        # Merge with existing badges
+        all_badges_json=$(echo "$all_badges_json" "$page_badges" | jq -s '.[0] + .[1]')
 
         # Check if there are more pages
         local has_more=$(echo "$response" | jq -r '.metadata.has_more // false')
@@ -127,10 +129,11 @@ fetch_badges() {
         ((page++))
     done
 
-    print_success "Found ${#all_badges[@]} badges"
+    local total_count=$(echo "$all_badges_json" | jq 'length')
+    print_success "Found $total_count badges" >&2
 
     # Return badges as JSON array
-    printf '%s\n' "${all_badges[@]}" | jq -s '.'
+    echo "$all_badges_json"
 }
 
 # Function to sanitize filename
@@ -260,9 +263,9 @@ main() {
     local counter=1
     echo "$badges_json" | jq -c '.[]' | while read -r badge; do
         # Extract badge information
-        local badge_name=$(echo "$badge" | jq -r '.name // "Unknown Badge"')
+        local badge_name=$(echo "$badge" | jq -r '.badge_template.name // .name // "Unknown Badge"')
         local badge_id=$(echo "$badge" | jq -r '.id // ""')
-        local image_url=$(echo "$badge" | jq -r '.image_url // .image // ""')
+        local image_url=$(echo "$badge" | jq -r '.image_url // .image.url // ""')
         local issued_at=$(echo "$badge" | jq -r '.issued_at // ""')
 
         print_info "[$counter/$badge_count] Processing: $badge_name"
