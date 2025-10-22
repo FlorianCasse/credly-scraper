@@ -4,7 +4,7 @@ Download and process your Credly badges with custom dimensions - available as bo
 
 ## 🌐 Web App (Recommended)
 
-**Try it now:** [https://maltewilhelm.github.io/credly-scraper](https://maltewilhelm.github.io/credly-scraper)
+**Try it now:** [https://github-throwaway.github.io/credly-scraper](https://github-throwaway.github.io/credly-scraper)
 
 The web app runs entirely in your browser - no installation required!
 
