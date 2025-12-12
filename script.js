@@ -62,26 +62,26 @@ function setLoading(isLoading) {
 // Fetch badges from Credly API
 async function fetchBadges(username) {
     const allBadges = [];
-    let page = 1;
-    const perPage = 100;
+    // Start with the base URL. We remove manual page parameters and let the API guide us.
+    let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
 
-    while (true) {
-        // Use CORS proxy for development, direct for GitHub Pages
-        const apiUrl = `https://www.credly.com/users/${username}/badges.json?page=${page}&per_page=${perPage}`;
-
-        // Try multiple CORS proxy options
+    while (nextUrl) {
         const corsProxies = [
-            '', // Try direct first (works on GitHub Pages)
+            '', // Try direct first
             'https://corsproxy.io/?',
             'https://api.allorigins.win/raw?url=',
         ];
 
+        let success = false;
         let lastError = null;
 
         for (const proxy of corsProxies) {
             try {
-                const url = proxy + encodeURIComponent(apiUrl);
-                const response = await fetch(proxy ? url : apiUrl);
+                // If using a proxy, we must encode the full nextUrl
+                // nextUrl is absolute (e.g., https://www.credly.com/...), so we encode it for the proxy
+                const url = proxy ? proxy + encodeURIComponent(nextUrl) : nextUrl;
+                
+                const response = await fetch(url);
 
                 if (!response.ok) {
                     throw new Error('Failed to fetch badges. User may not exist or profile is private.');
@@ -89,19 +89,23 @@ async function fetchBadges(username) {
 
                 const data = await response.json();
 
-                if (!data.data || data.data.length === 0) {
-                    return allBadges;
+                if (!data.data) {
+                    // Stop if the data field is missing
+                    break;
                 }
 
                 allBadges.push(...data.data);
 
-                // Check if there are more pages
-                if (!data.metadata || !data.metadata.has_more) {
-                    return allBadges;
+                // Update nextUrl for the next iteration
+                // The API provides the full URL for the next page in the metadata
+                if (data.metadata && data.metadata.next_page_url) {
+                    nextUrl = data.metadata.next_page_url;
+                } else {
+                    nextUrl = null; // No more pages
                 }
 
-                page++;
-                break; // Success, continue with next page using same proxy
+                success = true;
+                break; // Success, move to the outer loop (next page)
             } catch (error) {
                 lastError = error;
                 // Try next proxy
@@ -109,9 +113,14 @@ async function fetchBadges(username) {
             }
         }
 
-        // If all proxies failed, throw error
-        if (lastError && allBadges.length === 0) {
-            throw new Error(`Failed to fetch badges: ${lastError.message}. CORS may be blocking the request.`);
+        // If we tried all proxies for this page and failed, stop entirely
+        if (!success) {
+            if (allBadges.length === 0) {
+                 throw new Error(`Failed to fetch badges: ${lastError ? lastError.message : 'Unknown error'}. CORS may be blocking the request.`);
+            } else {
+                console.warn('Could not fetch all pages. Returning partial results.');
+                break;
+            }
         }
     }
 
