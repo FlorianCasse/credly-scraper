@@ -69,6 +69,27 @@ resultsTabsEl.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-btn')) showTab(e.target.dataset.tab);
 });
 
+// Creates a concurrency limiter: at most `max` async tasks run simultaneously
+function createConcurrencyLimiter(max) {
+    let running = 0;
+    const queue = [];
+    return function limit(fn) {
+        return new Promise((resolve, reject) => {
+            const run = async () => {
+                running++;
+                try { resolve(await fn()); }
+                catch (e) { reject(e); }
+                finally {
+                    running--;
+                    if (queue.length > 0) queue.shift()();
+                }
+            };
+            if (running < max) run();
+            else queue.push(run);
+        });
+    };
+}
+
 // Extract username from Credly URL
 function extractUsername(url) {
     const match = url.match(/credly\.com\/users\/([^\/]+)/);
@@ -146,28 +167,25 @@ function setLoading(isLoading) {
     }
 }
 
-// Fetch badges from Credly API
+// Fetch badges from Credly API with sticky proxy (reuses the working proxy across pages)
 async function fetchBadges(username) {
     const allBadges = [];
-    // Start with the base URL. We remove manual page parameters and let the API guide us.
     let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
+    const allProxies = ['', 'https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
+    let stickyProxy = null; // Reuse the proxy that worked on the first page
 
     while (nextUrl) {
-        const corsProxies = [
-            '', // Try direct first
-            'https://corsproxy.io/?',
-            'https://api.allorigins.win/raw?url=',
-        ];
+        // Try the known-good proxy first, then fall back to others
+        const proxiesToTry = stickyProxy !== null
+            ? [stickyProxy, ...allProxies.filter(p => p !== stickyProxy)]
+            : allProxies;
 
         let success = false;
         let lastError = null;
 
-        for (const proxy of corsProxies) {
+        for (const proxy of proxiesToTry) {
             try {
-                // If using a proxy, we must encode the full nextUrl
-                // nextUrl is absolute (e.g., https://www.credly.com/...), so we encode it for the proxy
                 const url = proxy ? proxy + encodeURIComponent(nextUrl) : nextUrl;
-                
                 const response = await fetch(url);
 
                 if (!response.ok) {
@@ -175,35 +193,22 @@ async function fetchBadges(username) {
                 }
 
                 const data = await response.json();
-
-                if (!data.data) {
-                    // Stop if the data field is missing
-                    break;
-                }
+                if (!data.data) break;
 
                 allBadges.push(...data.data);
-
-                // Update nextUrl for the next iteration
-                // The API provides the full URL for the next page in the metadata
-                if (data.metadata && data.metadata.next_page_url) {
-                    nextUrl = data.metadata.next_page_url;
-                } else {
-                    nextUrl = null; // No more pages
-                }
-
+                nextUrl = data.metadata?.next_page_url || null;
+                stickyProxy = proxy; // Remember this proxy for subsequent pages
                 success = true;
-                break; // Success, move to the outer loop (next page)
+                break;
             } catch (error) {
                 lastError = error;
-                // Try next proxy
                 continue;
             }
         }
 
-        // If we tried all proxies for this page and failed, stop entirely
         if (!success) {
             if (allBadges.length === 0) {
-                 throw new Error(`Failed to fetch badges: ${lastError ? lastError.message : 'Unknown error'}. CORS may be blocking the request.`);
+                throw new Error(`Failed to fetch badges: ${lastError?.message ?? 'Unknown error'}. CORS may be blocking the request.`);
             } else {
                 console.warn('Could not fetch all pages. Returning partial results.');
                 break;
@@ -216,23 +221,18 @@ async function fetchBadges(username) {
 
 // Load and process image
 async function loadAndProcessImage(imageUrl, targetWidth, targetHeight) {
-    // Try to load image with different strategies
     const strategies = [
-        // Strategy 1: Direct load with crossOrigin
         () => loadImageDirect(imageUrl),
-        // Strategy 2: Fetch through CORS proxy and convert to blob
         () => loadImageViaProxy(imageUrl),
     ];
 
     let lastError = null;
-
     for (const strategy of strategies) {
         try {
             const img = await strategy();
             return processImage(img, targetWidth, targetHeight);
         } catch (error) {
             lastError = error;
-            continue;
         }
     }
 
@@ -244,10 +244,8 @@ function loadImageDirect(imageUrl) {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
-
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error('Direct load failed'));
-
         img.src = imageUrl;
     });
 }
@@ -269,17 +267,11 @@ async function loadImageViaProxy(imageUrl) {
 
             return new Promise((resolve, reject) => {
                 const img = new Image();
-                img.onload = () => {
-                    URL.revokeObjectURL(objectUrl);
-                    resolve(img);
-                };
-                img.onerror = () => {
-                    URL.revokeObjectURL(objectUrl);
-                    reject(new Error('Proxy load failed'));
-                };
+                img.onload = () => { URL.revokeObjectURL(objectUrl); resolve(img); };
+                img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Proxy load failed')); };
                 img.src = objectUrl;
             });
-        } catch (error) {
+        } catch {
             continue;
         }
     }
@@ -294,23 +286,13 @@ function processImage(img, targetWidth, targetHeight) {
     canvas.height = targetHeight;
     const ctx = canvas.getContext('2d');
 
-    // Calculate scaling to fit within target dimensions while maintaining aspect ratio
-    const scale = Math.min(
-        targetWidth / img.width,
-        targetHeight / img.height
-    );
-
+    const scale = Math.min(targetWidth / img.width, targetHeight / img.height);
     const scaledWidth = img.width * scale;
     const scaledHeight = img.height * scale;
-
-    // Calculate position to center the image
     const x = (targetWidth - scaledWidth) / 2;
     const y = (targetHeight - scaledHeight) / 2;
 
-    // Clear canvas (transparent background)
     ctx.clearRect(0, 0, targetWidth, targetHeight);
-
-    // Draw image centered
     ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
 
     return canvas;
@@ -339,16 +321,11 @@ function createBadgeCard(badge, canvas, index) {
     `;
 
     if (canvas) {
-        const container = card.querySelector('.badge-image-container');
-        container.appendChild(canvas);
+        card.querySelector('.badge-image-container').appendChild(canvas);
     }
 
-    // Add event listeners
-    const downloadBtn = card.querySelector('.download-btn');
-    const viewBtn = card.querySelector('.view-original-btn');
-
-    downloadBtn.addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    viewBtn.addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
+    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
 
     return card;
 }
@@ -366,19 +343,15 @@ function showTab(tabName) {
 function renderCommonCertifications() {
     commonGrid.innerHTML = '';
 
-    // Group badges by template id (falling back to name)
     const groups = new Map();
     for (let i = 0; i < badges.length; i++) {
         const badge = badges[i];
         const key = badge.badge_template?.id || badge.badge_template?.name || badge.name;
         if (!key) continue;
-        if (!groups.has(key)) {
-            groups.set(key, { badge, globalIndex: i, holders: new Set() });
-        }
+        if (!groups.has(key)) groups.set(key, { badge, globalIndex: i, holders: new Set() });
         groups.get(key).holders.add(badge._username);
     }
 
-    // Only keep certs held by 2+ distinct profiles, sorted by holder count
     const shared = Array.from(groups.values())
         .filter(g => g.holders.size >= 2)
         .sort((a, b) => b.holders.size - a.holders.size);
@@ -418,7 +391,6 @@ function createCommonCard(badge, globalIndex, holders) {
         <div class="holders-list">${holdersHtml}</div>
     `;
 
-    // Reuse the already-processed canvas as a static image
     const canvas = processedBadges[globalIndex];
     const container = card.querySelector('.badge-image-container');
     if (canvas) {
@@ -440,6 +412,73 @@ function sanitizeFilename(name) {
         .replace(/__+/g, '_')
         .replace(/^_|_$/g, '')
         .substring(0, 100);
+}
+
+// Fetch and render a single profile into its pre-created container
+async function processOneProfile(username, container, keyword, filterDate, targetWidth, targetHeight, imageLimit) {
+    // Fetch display name and all badge pages concurrently
+    const [displayName, rawBadges] = await Promise.all([
+        fetchUserProfile(username),
+        fetchBadges(username),
+    ]);
+
+    userDisplayNames[username] = displayName;
+
+    // Apply keyword + date filters
+    let profileBadges = rawBadges.filter(b =>
+        matchesKeyword(b, keyword) &&
+        (!filterDate || (b.issued_at && new Date(b.issued_at) >= filterDate))
+    );
+
+    // Render profile header
+    const header = document.createElement('div');
+    header.className = 'profile-header';
+    header.textContent = profileBadges.length === 0
+        ? `${displayName} — No badges${keyword ? ` matching "${keyword}"` : ' found'}`
+        : `${displayName} (${profileBadges.length} badge${profileBadges.length !== 1 ? 's' : ''}${keyword ? ` matching "${keyword}"` : ''})`;
+    container.appendChild(header);
+
+    if (profileBadges.length === 0) return;
+
+    // Tag each badge with its profile username
+    profileBadges.forEach(b => { b._username = username; });
+
+    // Reserve a contiguous block of indices in the global array (atomic in JS — no await between read and push)
+    const startIndex = badges.length;
+    badges.push(...profileBadges);
+
+    // Pre-create all cards in order so DOM order is deterministic regardless of image load timing
+    const cards = profileBadges.map((badge, i) => {
+        const card = createBadgeCard(badge, null, startIndex + i);
+        container.appendChild(card);
+        return card;
+    });
+
+    // Load and process all images in parallel (capped by the shared imageLimit)
+    await Promise.all(profileBadges.map((badge, i) =>
+        imageLimit(async () => {
+            const globalIndex = startIndex + i;
+            const imageUrl = badge.image_url || badge.image?.url;
+            const imgContainer = cards[i].querySelector('.badge-image-container');
+
+            if (!imageUrl) {
+                imgContainer.innerHTML = '';
+                return;
+            }
+
+            try {
+                const canvas = await loadAndProcessImage(imageUrl, targetWidth, targetHeight);
+                processedBadges[globalIndex] = canvas;
+                imgContainer.innerHTML = '';
+                imgContainer.appendChild(canvas);
+            } catch {
+                imgContainer.innerHTML = '<div style="color:#dc3545;font-size:0.875rem;">Failed to load</div>';
+            }
+
+            // Update running total as images resolve
+            badgeCount.textContent = `(${badges.length})`;
+        })
+    ));
 }
 
 // Handle fetch badges
@@ -465,10 +504,8 @@ async function handleFetchBadges() {
         return;
     }
 
-    // Parse one URL per line, skip blank lines
     const lines = rawInput.split('\n').map(l => l.trim()).filter(Boolean);
 
-    // Resolve valid usernames and collect invalid lines
     const usernames = [];
     const invalidLines = [];
     for (const line of lines) {
@@ -491,87 +528,42 @@ async function handleFetchBadges() {
     try {
         setLoading(true);
         resultsSection.style.display = 'block';
+        showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} in parallel...`);
 
-        for (const username of usernames) {
-            showInfo(`Fetching badges for ${username}...`);
+        // Max 5 profiles fetched simultaneously, max 4 images loaded simultaneously
+        const profileLimit = createConcurrencyLimiter(5);
+        const imageLimit = createConcurrencyLimiter(4);
 
-            // Resolve display name (best-effort)
-            userDisplayNames[username] = await fetchUserProfile(username);
-            const displayName = userDisplayNames[username];
+        // Pre-create one container div per profile to preserve display order
+        // regardless of which profile finishes first
+        const profileContainers = usernames.map(() => {
+            const div = document.createElement('div');
+            badgesGrid.appendChild(div);
+            return div;
+        });
 
-            // Fetch this profile's badges
-            let profileBadges;
-            try {
-                profileBadges = await fetchBadges(username);
-            } catch (error) {
-                const errHeader = document.createElement('div');
-                errHeader.className = 'profile-header profile-header--error';
-                errHeader.textContent = `${displayName} — Failed: ${error.message}`;
-                badgesGrid.appendChild(errHeader);
-                continue;
-            }
+        // Fetch and render all profiles in parallel
+        await Promise.allSettled(
+            usernames.map((username, i) =>
+                profileLimit(() =>
+                    processOneProfile(
+                        username, profileContainers[i],
+                        keyword, filterDate,
+                        targetWidth, targetHeight,
+                        imageLimit
+                    ).catch(err => {
+                        const errHeader = document.createElement('div');
+                        errHeader.className = 'profile-header profile-header--error';
+                        errHeader.textContent = `${username} — Failed: ${err.message}`;
+                        profileContainers[i].appendChild(errHeader);
+                    })
+                )
+            )
+        );
 
-            // Profile section header
-            const header = document.createElement('div');
-            header.className = 'profile-header';
-            badgesGrid.appendChild(header);
+        badgeCount.textContent = `(${badges.length})`;
 
-            if (profileBadges.length === 0) {
-                header.textContent = `${displayName} — No badges found`;
-                continue;
-            }
-
-            // Apply keyword + date filters
-            profileBadges = profileBadges.filter(b =>
-                matchesKeyword(b, keyword) &&
-                (!filterDate || (b.issued_at && new Date(b.issued_at) >= filterDate))
-            );
-
-            header.textContent = profileBadges.length === 0
-                ? `${displayName} — No badges match "${keyword}"`
-                : `${displayName} (${profileBadges.length} badge${profileBadges.length !== 1 ? 's' : ''}${keyword ? ` matching "${keyword}"` : ''})`;
-
-            if (profileBadges.length === 0) continue;
-
-            // Tag each badge with its profile username
-            profileBadges.forEach(b => { b._username = username; });
-
-            const startIndex = badges.length;
-            badges.push(...profileBadges);
-
-            // Render and process images for this profile
-            for (let i = 0; i < profileBadges.length; i++) {
-                const badge = profileBadges[i];
-                const globalIndex = startIndex + i;
-                const imageUrl = badge.image_url || badge.image?.url;
-
-                if (!imageUrl) {
-                    console.warn('No image URL for badge:', badge);
-                    continue;
-                }
-
-                const card = createBadgeCard(badge, null, globalIndex);
-                badgesGrid.appendChild(card);
-
-                try {
-                    const canvas = await loadAndProcessImage(imageUrl, targetWidth, targetHeight);
-                    processedBadges[globalIndex] = canvas;
-
-                    const container = card.querySelector('.badge-image-container');
-                    container.innerHTML = '';
-                    container.appendChild(canvas);
-                } catch (error) {
-                    console.error('Error processing badge image:', error);
-                    const container = card.querySelector('.badge-image-container');
-                    container.innerHTML = '<div style="color: #dc3545; font-size: 0.875rem;">Failed to load</div>';
-                }
-            }
-
-            // Update running total
-            badgeCount.textContent = `(${badges.length})`;
-        }
-
-        // After all profiles: show Common Certifications tab when 2+ profiles have results
+        // Show Common Certifications tab if 2+ distinct profiles have results
         const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
         if (distinctProfiles >= 2) {
             renderCommonCertifications();
@@ -623,7 +615,6 @@ async function handleDownloadAll() {
 
         const zip = new JSZip();
 
-        // Add each badge to ZIP, organised by profile subfolder
         for (let i = 0; i < badges.length; i++) {
             const canvas = processedBadges[i];
             if (!canvas) continue;
@@ -637,10 +628,7 @@ async function handleDownloadAll() {
             zip.file(filename, blob);
         }
 
-        // Generate ZIP
         const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-        // Download ZIP
         const url = URL.createObjectURL(zipBlob);
         const a = document.createElement('a');
         a.href = url;
@@ -659,7 +647,7 @@ async function handleDownloadAll() {
     }
 }
 
-// Escape a value for CSV (wrap in quotes if it contains commas, quotes, or newlines)
+// Escape a value for CSV
 function escapeCSV(value) {
     const str = String(value ?? '');
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -701,16 +689,13 @@ function handleExportCSV() {
 
 // Update the textarea to reflect the current checkbox selection
 function updateTextareaFromCheckboxes() {
-    // Build a set of all predefined usernames for manual-line detection
     const allPredefinedUsernames = new Set(
         Object.values(PREDEFINED_PROFILES).flat().map(normalizeProfileUrl)
     );
 
-    // Preserve lines the user typed manually (not part of any predefined country)
     const currentLines = profileUrlInput.value.split('\n').map(l => l.trim()).filter(Boolean);
     const manualLines = currentLines.filter(l => !allPredefinedUsernames.has(normalizeProfileUrl(l)));
 
-    // Collect URLs from checked countries
     const countryLines = [];
     for (const [country, urls] of Object.entries(PREDEFINED_PROFILES)) {
         const checkbox = document.querySelector(`.country-pill[data-country="${country}"] input`);
