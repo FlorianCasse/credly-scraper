@@ -3,26 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Credly Badge Processor</title>
+    <title>Credly Badge Scraper</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Credly Badge Processor</h1>
-            <p class="subtitle">Download and process your Credly badges with custom dimensions</p>
+            <h1>Credly Badge Scraper</h1>
+            <p class="subtitle">Give you the ability to list all the certifications within the region. Tool based on Malte Wilhelm work</p>
         </header>
 
         <main>
             <section class="input-section">
+                <div id="quick-select" class="quick-select"></div>
+
                 <div class="input-group">
-                    <label for="profile-url">Credly Profile URL</label>
-                    <input
-                        type="text"
+                    <label for="profile-url">Credly Profile URL(s) <span class="label-hint">— one per line · Ctrl+Enter to fetch</span></label>
+                    <textarea
                         id="profile-url"
-                        placeholder="https://www.credly.com/users/your-username"
-                        aria-label="Credly profile URL"
-                    >
+                        rows="3"
+                        placeholder="https://www.credly.com/users/username1&#10;https://www.credly.com/users/username2"
+                        aria-label="Credly profile URLs, one per line"
+                    ></textarea>
+                </div>
+
+                <div class="filters-group">
+                    <div class="input-group">
+                        <label for="filter-keyword">Filter by keyword <span class="label-hint">— leave empty to include all</span></label>
+                        <input
+                            type="text"
+                            id="filter-keyword"
+                            placeholder="e.g. VMware, AWS, Azure..."
+                            aria-label="Filter certifications by keyword"
+                        >
+                    </div>
+                    <div class="input-group">
+                        <label for="filter-date">Issued after <span class="label-hint">— leave empty to include all</span></label>
+                        <input
+                            type="date"
+                            id="filter-date"
+                            aria-label="Only show certifications issued after this date"
+                        >
+                    </div>
                 </div>
 
                 <div class="dimensions-group">
@@ -47,10 +69,19 @@
 
             <section id="results-section" class="results-section" style="display: none;">
                 <div class="results-header">
-                    <h2>Your Badges <span id="badge-count"></span></h2>
-                    <button id="download-all-btn" class="secondary-btn">Download All as ZIP</button>
+                    <h2>Badges <span id="badge-count"></span></h2>
+                    <div class="results-actions">
+                        <button id="export-csv-btn" class="csv-btn">Export CSV</button>
+                        <button id="download-all-btn" class="secondary-btn">Download All as ZIP</button>
+                    </div>
                 </div>
 
+                <div id="results-tabs" class="results-tabs" style="display: none;">
+                    <button class="tab-btn tab-btn--active" data-tab="common">Common Certifications</button>
+                    <button class="tab-btn" data-tab="by-profile">By Profile</button>
+                </div>
+
+                <div id="common-grid" class="common-grid" style="display: none;"></div>
                 <div id="badges-grid" class="badges-grid"></div>
             </section>
         </main>

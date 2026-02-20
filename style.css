@@ -58,6 +58,65 @@ header h1 {
     margin-bottom: 2rem;
 }
 
+.quick-select {
+    margin-bottom: 1.5rem;
+}
+
+.quick-select-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-color);
+    margin-bottom: 0.6rem;
+}
+
+.country-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.country-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.9rem;
+    border: 2px solid var(--border-color);
+    border-radius: 999px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.country-pill:hover {
+    border-color: var(--primary-color);
+}
+
+.country-pill:has(input:checked) {
+    border-color: var(--primary-color);
+    background-color: #e8f1ff;
+    color: var(--primary-color);
+}
+
+.country-pill input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    accent-color: var(--primary-color);
+    cursor: pointer;
+}
+
+.country-pill-count {
+    color: var(--secondary-color);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
+
+.country-pill:has(input:checked) .country-pill-count {
+    color: inherit;
+    opacity: 0.75;
+}
+
 .input-group {
     margin-bottom: 1.5rem;
 }
@@ -69,20 +128,35 @@ header h1 {
     color: var(--text-color);
 }
 
-.input-group input {
+.input-group input,
+.input-group textarea {
     width: 100%;
     padding: 0.75rem;
     border: 2px solid var(--border-color);
     border-radius: 8px;
     font-size: 1rem;
+    font-family: inherit;
     transition: border-color 0.3s ease;
 }
 
-.input-group input:focus {
+.input-group textarea {
+    resize: vertical;
+    line-height: 1.5;
+}
+
+.input-group input:focus,
+.input-group textarea:focus {
     outline: none;
     border-color: var(--primary-color);
 }
 
+.label-hint {
+    font-weight: 400;
+    font-size: 0.8rem;
+    color: var(--secondary-color);
+}
+
+.filters-group,
 .dimensions-group {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -129,6 +203,34 @@ header h1 {
     background-color: #5a6268;
     transform: translateY(-2px);
     box-shadow: var(--shadow-hover);
+}
+
+.csv-btn {
+    padding: 0.875rem 2rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background-color: var(--success-color);
+    color: white;
+}
+
+.csv-btn:hover {
+    background-color: #218838;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+}
+
+.results-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .spinner {
@@ -192,10 +294,87 @@ header h1 {
     font-weight: 400;
 }
 
+.results-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.tab-btn {
+    padding: 0.6rem 1.5rem;
+    border: none;
+    background: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--secondary-color);
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.tab-btn--active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.tab-btn:hover:not(.tab-btn--active) {
+    color: var(--text-color);
+}
+
+.common-grid,
 .badges-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 1.5rem;
+}
+
+.no-common-msg {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--secondary-color);
+    padding: 2rem;
+}
+
+.holders-count {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.holders-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+}
+
+.holder-tag {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.profile-header {
+    grid-column: 1 / -1;
+    padding: 0.6rem 1rem;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-top: 0.5rem;
+}
+
+.profile-header:first-child {
+    margin-top: 0;
+}
+
+.profile-header--error {
+    background-color: var(--error-color);
 }
 
 .badge-card {
@@ -338,6 +517,7 @@ footer a:hover {
         font-size: 2rem;
     }
 
+    .filters-group,
     .dimensions-group {
         grid-template-columns: 1fr;
     }
