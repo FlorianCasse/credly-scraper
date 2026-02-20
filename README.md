@@ -1,37 +1,49 @@
-# Credly Badge Processor
+# Credly Badge Scraper
 
-Download and process your Credly badges with custom dimensions - available as both a **web app** and **command-line tool**.
+Give you the ability to list all the certifications within the region. Tool based on Malte Wilhelm work.
 
-## 🌐 Web App (Recommended)
+Available as both a **web app** and **command-line tool**.
 
-**Try it now:** [https://github-throwaway.github.io/credly-scraper](https://github-throwaway.github.io/credly-scraper)
+## Web App
 
-The web app runs entirely in your browser - no installation required!
+**Try it now:** [https://floriancasse.github.io/credly-scraper](https://floriancasse.github.io/credly-scraper)
 
-> **Note:** The app uses CORS proxies to fetch data from Credly's API since direct browser requests are blocked by CORS policies. Once deployed on GitHub Pages, the app will try direct requests first, falling back to proxies if needed.
+The web app runs entirely in your browser — no installation required!
+
+> **Note:** The app uses CORS proxies to fetch data from Credly's API since direct browser requests are blocked by CORS policies. The app tries direct requests first, falling back to proxies if needed.
 
 ### Features
 
-- ✨ No installation needed - runs in your browser
-- 🔒 100% client-side processing - your data never leaves your device
-- 📦 Download individual badges or all as a ZIP file
-- 🎨 Customizable output dimensions (default: 512x254px)
-- 🖼️ Automatic image resizing and centering with transparent background
-- 📱 Responsive design - works on desktop and mobile
+- **Multiple profiles** — Paste one Credly profile URL per line to scrape several people at once
+- **Country quick-select** — One-click checkboxes to load predefined profiles for France, Belgium, and Luxembourg
+- **Common Certifications view** — When multiple profiles are loaded, see which certifications are shared across people, sorted by number of holders
+- **By Profile view** — Browse all certifications organised per person
+- **Keyword filter** — Type a keyword (e.g. VMware, AWS, Azure) to only show matching certifications
+- **Date filter** — Only show certifications issued after a given date
+- **CSV export** — Download the full list as a CSV file (columns: Profile, Name, Issuer, Issued At, Expires At, Badge URL, Image URL)
+- **ZIP download** — Download all badge images at once as a ZIP, organised into per-profile subfolders
+- **Individual download** — Download any single badge image directly
+- **Customisable dimensions** — Set your own output width and height (default: 512×254 px)
+- **Automatic image processing** — Badges are resized and centred on a transparent canvas at your chosen dimensions
+- **Display names** — People are shown by their first and last name, not their username
+- **100% client-side** — Your data never leaves your browser (except API calls through a CORS proxy)
+- **Responsive design** — Works on desktop and mobile
 
-### How to Use the Web App
+### How to Use
 
-1. Visit the web app URL
-2. Paste your Credly profile URL (e.g., `https://www.credly.com/users/your-username`)
-3. Optionally adjust the output dimensions
-4. Click "Fetch Badges"
-5. Download individual badges or all as a ZIP file
+1. Visit the [web app](https://floriancasse.github.io/credly-scraper)
+2. Use the country quick-select checkboxes **or** paste Credly profile URLs manually (one per line)
+3. Optionally set a keyword filter and/or an "issued after" date
+4. Optionally adjust the output dimensions
+5. Click **Fetch Badges** (or press **Ctrl+Enter**)
+6. Switch between **Common Certifications** and **By Profile** tabs
+7. Export as CSV or download images individually / as a ZIP
 
 ---
 
-## 💻 Command-Line Tool (macOS)
+## Command-Line Tool (macOS)
 
-A shell script for macOS that downloads all badges from a Credly profile, performs OCR to extract badge names, and processes the images to a standardized format.
+A shell script for macOS that downloads all badges from a Credly profile, performs OCR to extract badge names, and processes the images to a standardised format.
 
 ### Features
 
@@ -39,14 +51,12 @@ A shell script for macOS that downloads all badges from a Credly profile, perfor
 - Performs OCR on badge images to extract text
 - Automatically renames badges based on OCR results
 - Processes images using ImageMagick CLI tools:
-  - Resizes images to fit within 512x254 pixels (maintaining aspect ratio)
-  - Centers images on a 512x254 transparent canvas
+  - Resizes images to fit within 512×254 pixels (maintaining aspect ratio)
+  - Centres images on a 512×254 transparent canvas
   - Exports as PNG with transparency
-- Organizes output into structured directories
+- Organises output into structured directories
 
-## Prerequisites
-
-The script requires the following tools to be installed on macOS:
+### Prerequisites
 
 ```bash
 # Install Homebrew if not already installed
@@ -61,17 +71,15 @@ brew install jq tesseract imagemagick
 - **curl**: HTTP client (usually pre-installed on macOS)
 - **jq**: JSON processor for parsing Credly API responses
 - **tesseract**: OCR engine for extracting text from badge images
-- **ImageMagick**: Image processing toolkit (replaces GIMP with CLI tools)
+- **ImageMagick**: Image processing toolkit
 
-## Usage
-
-### Basic Usage
+### Usage
 
 ```bash
 ./credly_badge_downloader.sh <credly-profile-url>
 ```
 
-### Examples
+**Examples:**
 
 ```bash
 # Download badges from a Credly profile
@@ -81,9 +89,7 @@ brew install jq tesseract imagemagick
 ./credly_badge_downloader.sh https://www.credly.com/users/johndoe/badges
 ```
 
-## Output Structure
-
-The script creates a timestamped directory containing:
+### Output Structure
 
 ```
 credly_badges_username_20231022_143000/
@@ -91,7 +97,7 @@ credly_badges_username_20231022_143000/
 │   ├── 1_AWS_Certified_Solutions_Architect.png
 │   ├── 2_Google_Cloud_Professional.png
 │   └── ...
-├── processed/              # Processed badges (512x254, centered, transparent background)
+├── processed/              # Processed badges (512x254, centred, transparent background)
 │   ├── 1_AWS_Certified_Solutions_Architect_processed.png
 │   ├── 2_Google_Cloud_Professional_processed.png
 │   └── ...
@@ -101,13 +107,13 @@ credly_badges_username_20231022_143000/
     └── ...
 ```
 
-## Image Processing Details
+### Image Processing Details
 
 The script replicates the GIMP workflow using ImageMagick CLI tools:
 
-1. **Resize**: Images are resized to fit within 512x254 pixels while maintaining aspect ratio
-2. **Canvas**: Creates a 512x254 pixel canvas with transparent background
-3. **Center**: Centers the resized image on the canvas
+1. **Resize**: Images are resized to fit within 512×254 pixels while maintaining aspect ratio
+2. **Canvas**: Creates a 512×254 pixel canvas with transparent background
+3. **Center**: Centres the resized image on the canvas
 4. **Export**: Saves as PNG with transparency preserved
 
 This is equivalent to the following ImageMagick command:
@@ -115,61 +121,12 @@ This is equivalent to the following ImageMagick command:
 magick input.png -resize 512x254 -background none -gravity center -extent 512x254 output.png
 ```
 
-## How It Works
-
-1. **Dependency Check**: Verifies all required tools are installed
-2. **User Extraction**: Parses the Credly profile URL to extract the username
-3. **Badge Fetching**: Queries the Credly API to retrieve all badges
-4. **Download**: Downloads each badge image
-5. **OCR Processing**: Runs Tesseract OCR to extract text from badge images
-6. **Renaming**: Renames files based on OCR results (falls back to badge name if OCR fails)
-7. **Image Processing**: Processes images using ImageMagick to standardize dimensions
-8. **Metadata**: Saves badge metadata in JSON format
-
-## Error Handling
-
-The script includes comprehensive error handling:
-
-- Validates Credly profile URL format
-- Checks for missing dependencies
-- Handles API errors gracefully
-- Skips badges with missing images
-- Falls back to badge names when OCR fails
-
-## Troubleshooting
-
-### "Missing dependencies" error
-
-Install the missing tools using Homebrew:
-```bash
-brew install jq tesseract imagemagick
-```
-
-### "Failed to fetch badges" error
-
-- Verify the Credly profile URL is correct
-- Check if the profile is public (private profiles cannot be accessed)
-- Ensure you have an internet connection
-
-### OCR not detecting text
-
-- Tesseract works best with clear, high-contrast text
-- Some badge designs may not contain extractable text
-- The script will fall back to the badge name from Credly's metadata
-
-### ImageMagick errors
-
-Ensure ImageMagick is properly installed:
-```bash
-magick --version
-# or
-convert --version
-```
+---
 
 ## Limitations
 
 - Only works with public Credly profiles
-- OCR accuracy depends on badge image quality and text clarity
+- OCR accuracy depends on badge image quality and text clarity (CLI tool only)
 - Requires active internet connection
 - API rate limits may apply for users with many badges
 
@@ -179,4 +136,4 @@ MIT License - Feel free to modify and distribute
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Contributions are welcome! Please feel free to submit issues or pull requests on [GitHub](https://github.com/FlorianCasse/credly-scraper).
