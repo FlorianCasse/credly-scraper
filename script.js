@@ -17,6 +17,7 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/olivier-boulat.2c807e36',
         'https://www.credly.com/users/philippe-cheron.ab050cb5',
         'https://www.credly.com/users/sebastien-aucouturier',
+        'https://www.credly.com/users/leonardo-coscia',
         'https://www.credly.com/users/vincent-taupenas',
     ],
     'Belgium': [
