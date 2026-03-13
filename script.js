@@ -3,6 +3,52 @@ let badges = [];
 let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
 
+// Custom profiles from localStorage (user-added)
+function loadCustomProfiles() {
+    try {
+        return JSON.parse(localStorage.getItem('customProfiles')) || {};
+    } catch {
+        return {};
+    }
+}
+
+function saveCustomProfiles(profiles) {
+    localStorage.setItem('customProfiles', JSON.stringify(profiles));
+}
+
+// Merge predefined + custom profiles into one object
+function getAllProfiles() {
+    const custom = loadCustomProfiles();
+    const merged = { ...PREDEFINED_PROFILES };
+    for (const [country, urls] of Object.entries(custom)) {
+        if (merged[country]) {
+            // Deduplicate when merging
+            const existing = new Set(merged[country].map(normalizeProfileUrl));
+            for (const url of urls) {
+                if (!existing.has(normalizeProfileUrl(url))) {
+                    merged[country].push(url);
+                }
+            }
+        } else {
+            merged[country] = [...urls];
+        }
+    }
+    return merged;
+}
+
+// Check if a given url in a given country is a custom (user-added) profile
+function isCustomProfile(country, url) {
+    const custom = loadCustomProfiles();
+    if (!custom[country]) return false;
+    const norm = normalizeProfileUrl(url);
+    return custom[country].some(u => normalizeProfileUrl(u) === norm);
+}
+
+// Check if a country is entirely custom (not predefined)
+function isCustomCountry(country) {
+    return !PREDEFINED_PROFILES[country];
+}
+
 // Predefined profiles grouped by country
 const PREDEFINED_PROFILES = {
     'France': [
@@ -690,26 +736,28 @@ function handleExportCSV() {
 
 // Update the textarea to reflect the current checkbox selection
 function updateTextareaFromCheckboxes() {
-    const allPredefinedUsernames = new Set(
-        Object.values(PREDEFINED_PROFILES).flat().map(normalizeProfileUrl)
+    const allProfiles = getAllProfiles();
+    const allKnownUsernames = new Set(
+        Object.values(allProfiles).flat().map(normalizeProfileUrl)
     );
 
     const currentLines = profileUrlInput.value.split('\n').map(l => l.trim()).filter(Boolean);
-    const manualLines = currentLines.filter(l => !allPredefinedUsernames.has(normalizeProfileUrl(l)));
+    const manualLines = currentLines.filter(l => !allKnownUsernames.has(normalizeProfileUrl(l)));
 
     const countryLines = [];
-    for (const [country, urls] of Object.entries(PREDEFINED_PROFILES)) {
-        const checkbox = document.querySelector(`.country-pill[data-country="${country}"] input`);
+    for (const [country, urls] of Object.entries(allProfiles)) {
+        const checkbox = document.querySelector(`.country-pill[data-country="${CSS.escape(country)}"] input[type="checkbox"]`);
         if (checkbox?.checked) countryLines.push(...urls);
     }
 
     profileUrlInput.value = [...manualLines, ...countryLines].join('\n');
 }
 
-// Render country pill checkboxes from PREDEFINED_PROFILES
+// Render country pill checkboxes from merged profiles
 function initQuickSelect() {
     const container = document.getElementById('quick-select');
     if (!container) return;
+    container.innerHTML = '';
 
     const title = document.createElement('p');
     title.className = 'quick-select-title';
@@ -720,9 +768,10 @@ function initQuickSelect() {
     pills.className = 'country-pills';
     container.appendChild(pills);
 
-    for (const [country, urls] of Object.entries(PREDEFINED_PROFILES)) {
+    const allProfiles = getAllProfiles();
+    for (const [country, urls] of Object.entries(allProfiles)) {
         const label = document.createElement('label');
-        label.className = 'country-pill';
+        label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
         label.dataset.country = country;
         label.innerHTML = `
             <input type="checkbox">
@@ -732,6 +781,167 @@ function initQuickSelect() {
         label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
         pills.appendChild(label);
     }
+
+    // "Add Profile" button
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'add-profile-btn';
+    addBtn.innerHTML = '<span class="plus-icon">+</span> Add Profile';
+    addBtn.addEventListener('click', openAddProfileModal);
+    pills.appendChild(addBtn);
+
+    // Render custom profiles list (removable)
+    const custom = loadCustomProfiles();
+    const customEntries = Object.entries(custom).flatMap(([country, urls]) =>
+        urls.map(url => ({ country, url }))
+    );
+    if (customEntries.length > 0) {
+        const listContainer = document.createElement('div');
+        listContainer.className = 'custom-profiles-list';
+
+        const listTitle = document.createElement('p');
+        listTitle.className = 'quick-select-title';
+        listTitle.textContent = 'Your added profiles';
+        listContainer.appendChild(listTitle);
+
+        const list = document.createElement('div');
+        list.className = 'custom-profiles-tags';
+        for (const { country, url } of customEntries) {
+            const username = url.match(/\/users\/([^\/\s#?]+)/i)?.[1] || url;
+            const tag = document.createElement('span');
+            tag.className = 'custom-profile-tag';
+            tag.innerHTML = `
+                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
+                <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
+            `;
+            tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
+                removeCustomProfile(country, url);
+            });
+            list.appendChild(tag);
+        }
+        listContainer.appendChild(list);
+        container.appendChild(listContainer);
+    }
+}
+
+// Remove a custom profile from a country
+function removeCustomProfile(country, url) {
+    const custom = loadCustomProfiles();
+    if (!custom[country]) return;
+
+    custom[country] = custom[country].filter(u => normalizeProfileUrl(u) !== normalizeProfileUrl(url));
+    if (custom[country].length === 0) delete custom[country];
+
+    saveCustomProfiles(custom);
+    initQuickSelect();
+    updateTextareaFromCheckboxes();
+}
+
+// Modal logic
+function openAddProfileModal() {
+    const modal = document.getElementById('add-profile-modal');
+    const countrySelect = document.getElementById('modal-country');
+    const newCountryGroup = document.getElementById('new-country-group');
+    const newCountryInput = document.getElementById('modal-new-country');
+    const modalError = document.getElementById('modal-error');
+    const profileUrlModalInput = document.getElementById('modal-profile-url');
+
+    // Reset form
+    profileUrlModalInput.value = '';
+    newCountryInput.value = '';
+    modalError.style.display = 'none';
+    newCountryGroup.style.display = 'none';
+
+    // Populate country dropdown
+    const allProfiles = getAllProfiles();
+    countrySelect.innerHTML = '<option value="" disabled selected>Select a country...</option>';
+    for (const country of Object.keys(allProfiles).sort()) {
+        const opt = document.createElement('option');
+        opt.value = country;
+        opt.textContent = country;
+        countrySelect.appendChild(opt);
+    }
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__';
+    newOpt.textContent = '+ Add a new country...';
+    countrySelect.appendChild(newOpt);
+
+    modal.showModal();
+}
+
+function initModal() {
+    const modal = document.getElementById('add-profile-modal');
+    const form = document.getElementById('add-profile-form');
+    const countrySelect = document.getElementById('modal-country');
+    const newCountryGroup = document.getElementById('new-country-group');
+    const newCountryInput = document.getElementById('modal-new-country');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+    const modalError = document.getElementById('modal-error');
+
+    // Show/hide new country input
+    countrySelect.addEventListener('change', () => {
+        const isNew = countrySelect.value === '__new__';
+        newCountryGroup.style.display = isNew ? 'block' : 'none';
+        newCountryInput.required = isNew;
+    });
+
+    // Cancel
+    cancelBtn.addEventListener('click', () => modal.close());
+
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.close();
+    });
+
+    // Submit
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const url = document.getElementById('modal-profile-url').value.trim();
+        const countryValue = countrySelect.value;
+        const newCountry = newCountryInput.value.trim();
+
+        // Validate URL
+        if (!url.match(/credly\.com\/users\/[^\/\s]+/i)) {
+            modalError.textContent = 'Please enter a valid Credly profile URL (e.g. https://www.credly.com/users/username)';
+            modalError.style.display = 'block';
+            return;
+        }
+
+        // Determine country
+        let country;
+        if (countryValue === '__new__') {
+            if (!newCountry) {
+                modalError.textContent = 'Please enter a country name.';
+                modalError.style.display = 'block';
+                return;
+            }
+            country = newCountry;
+        } else {
+            country = countryValue;
+        }
+
+        // Check for duplicate
+        const allProfiles = getAllProfiles();
+        const norm = normalizeProfileUrl(url);
+        for (const [c, urls] of Object.entries(allProfiles)) {
+            if (urls.some(u => normalizeProfileUrl(u) === norm)) {
+                modalError.textContent = `This profile already exists under "${c}".`;
+                modalError.style.display = 'block';
+                return;
+            }
+        }
+
+        // Save
+        const custom = loadCustomProfiles();
+        if (!custom[country]) custom[country] = [];
+        // Normalize the URL to a full format
+        const fullUrl = url.match(/^https?:\/\//) ? url : `https://www.credly.com/users/${url}`;
+        custom[country].push(fullUrl);
+        saveCustomProfiles(custom);
+
+        modal.close();
+        initQuickSelect();
+    });
 }
 
 // Ctrl+Enter (or Cmd+Enter on Mac) triggers fetch from the textarea
@@ -741,5 +951,6 @@ profileUrlInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialise quick-select checkboxes on page load
+// Initialise quick-select checkboxes and modal on page load
 initQuickSelect();
+initModal();
