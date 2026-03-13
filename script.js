@@ -3,26 +3,26 @@ let badges = [];
 let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
 
-// Custom profiles from localStorage (user-added)
-function loadCustomProfiles() {
+// Custom profiles from server API
+let cachedCustomProfiles = null;
+
+async function loadCustomProfiles() {
     try {
-        return JSON.parse(localStorage.getItem('customProfiles')) || {};
+        const res = await fetch('/api/profiles');
+        if (!res.ok) return {};
+        cachedCustomProfiles = await res.json();
+        return cachedCustomProfiles;
     } catch {
-        return {};
+        return cachedCustomProfiles || {};
     }
 }
 
-function saveCustomProfiles(profiles) {
-    localStorage.setItem('customProfiles', JSON.stringify(profiles));
-}
-
 // Merge predefined + custom profiles into one object
-function getAllProfiles() {
-    const custom = loadCustomProfiles();
+async function getAllProfiles() {
+    const custom = await loadCustomProfiles();
     const merged = { ...PREDEFINED_PROFILES };
     for (const [country, urls] of Object.entries(custom)) {
         if (merged[country]) {
-            // Deduplicate when merging
             const existing = new Set(merged[country].map(normalizeProfileUrl));
             for (const url of urls) {
                 if (!existing.has(normalizeProfileUrl(url))) {
@@ -34,14 +34,6 @@ function getAllProfiles() {
         }
     }
     return merged;
-}
-
-// Check if a given url in a given country is a custom (user-added) profile
-function isCustomProfile(country, url) {
-    const custom = loadCustomProfiles();
-    if (!custom[country]) return false;
-    const norm = normalizeProfileUrl(url);
-    return custom[country].some(u => normalizeProfileUrl(u) === norm);
 }
 
 // Check if a country is entirely custom (not predefined)
@@ -735,8 +727,8 @@ function handleExportCSV() {
 }
 
 // Update the textarea to reflect the current checkbox selection
-function updateTextareaFromCheckboxes() {
-    const allProfiles = getAllProfiles();
+async function updateTextareaFromCheckboxes() {
+    const allProfiles = await getAllProfiles();
     const allKnownUsernames = new Set(
         Object.values(allProfiles).flat().map(normalizeProfileUrl)
     );
@@ -754,7 +746,7 @@ function updateTextareaFromCheckboxes() {
 }
 
 // Render country pill checkboxes from merged profiles
-function initQuickSelect() {
+async function initQuickSelect() {
     const container = document.getElementById('quick-select');
     if (!container) return;
     container.innerHTML = '';
@@ -768,7 +760,7 @@ function initQuickSelect() {
     pills.className = 'country-pills';
     container.appendChild(pills);
 
-    const allProfiles = getAllProfiles();
+    const allProfiles = await getAllProfiles();
     for (const [country, urls] of Object.entries(allProfiles)) {
         const label = document.createElement('label');
         label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
@@ -791,7 +783,7 @@ function initQuickSelect() {
     pills.appendChild(addBtn);
 
     // Render custom profiles list (removable)
-    const custom = loadCustomProfiles();
+    const custom = cachedCustomProfiles || {};
     const customEntries = Object.entries(custom).flatMap(([country, urls]) =>
         urls.map(url => ({ country, url }))
     );
@@ -825,33 +817,37 @@ function initQuickSelect() {
 }
 
 // Remove a custom profile from a country
-function removeCustomProfile(country, url) {
-    const custom = loadCustomProfiles();
-    if (!custom[country]) return;
+async function removeCustomProfile(country, url) {
+    const password = sessionPassword || prompt('Enter the password to remove a profile:');
+    if (!password) return;
 
-    custom[country] = custom[country].filter(u => normalizeProfileUrl(u) !== normalizeProfileUrl(url));
-    if (custom[country].length === 0) delete custom[country];
-
-    saveCustomProfiles(custom);
-    initQuickSelect();
-    updateTextareaFromCheckboxes();
-}
-
-// Password gate for add-profile feature
-const ADD_PROFILE_PASSWORD = 'ITQCertifications1!';
-let addProfileUnlocked = false;
-
-// Modal logic
-function openAddProfileModal() {
-    if (!addProfileUnlocked) {
-        const input = prompt('Enter the password to add a profile:');
-        if (input !== ADD_PROFILE_PASSWORD) {
-            if (input !== null) alert('Incorrect password.');
+    try {
+        const res = await fetch('/api/profiles', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password, country, url }),
+        });
+        if (res.status === 401) {
+            sessionPassword = null;
+            alert('Incorrect password.');
             return;
         }
-        addProfileUnlocked = true;
+        if (!res.ok) { alert('Failed to remove profile.'); return; }
+        sessionPassword = password;
+    } catch {
+        alert('Network error.');
+        return;
     }
 
+    await initQuickSelect();
+    await updateTextareaFromCheckboxes();
+}
+
+// Password session cache (only lives in memory, never persisted)
+let sessionPassword = null;
+
+// Modal logic
+async function openAddProfileModal() {
     const modal = document.getElementById('add-profile-modal');
     const countrySelect = document.getElementById('modal-country');
     const newCountryGroup = document.getElementById('new-country-group');
@@ -866,7 +862,7 @@ function openAddProfileModal() {
     newCountryGroup.style.display = 'none';
 
     // Populate country dropdown
-    const allProfiles = getAllProfiles();
+    const allProfiles = await getAllProfiles();
     countrySelect.innerHTML = '<option value="" disabled selected>Select a country...</option>';
     for (const country of Object.keys(allProfiles).sort()) {
         const opt = document.createElement('option');
@@ -907,7 +903,7 @@ function initModal() {
     });
 
     // Submit
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const url = document.getElementById('modal-profile-url').value.trim();
         const countryValue = countrySelect.value;
@@ -933,8 +929,8 @@ function initModal() {
             country = countryValue;
         }
 
-        // Check for duplicate
-        const allProfiles = getAllProfiles();
+        // Check for duplicate against full set (predefined + custom)
+        const allProfiles = await getAllProfiles();
         const norm = normalizeProfileUrl(url);
         for (const [c, urls] of Object.entries(allProfiles)) {
             if (urls.some(u => normalizeProfileUrl(u) === norm)) {
@@ -944,16 +940,41 @@ function initModal() {
             }
         }
 
-        // Save
-        const custom = loadCustomProfiles();
-        if (!custom[country]) custom[country] = [];
-        // Normalize the URL to a full format
+        // Ask for password if not yet cached
+        const password = sessionPassword || prompt('Enter the password to add a profile:');
+        if (!password) return;
+
         const fullUrl = url.match(/^https?:\/\//) ? url : `https://www.credly.com/users/${url}`;
-        custom[country].push(fullUrl);
-        saveCustomProfiles(custom);
+
+        try {
+            const res = await fetch('/api/profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password, country, url: fullUrl }),
+            });
+
+            if (res.status === 401) {
+                sessionPassword = null;
+                modalError.textContent = 'Incorrect password.';
+                modalError.style.display = 'block';
+                return;
+            }
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                modalError.textContent = data.error || 'Failed to add profile.';
+                modalError.style.display = 'block';
+                return;
+            }
+
+            sessionPassword = password;
+        } catch {
+            modalError.textContent = 'Network error. Is the server running?';
+            modalError.style.display = 'block';
+            return;
+        }
 
         modal.close();
-        initQuickSelect();
+        await initQuickSelect();
     });
 }
 

@@ -1,6 +1,9 @@
 # Output directories
 credly_badges_*
 
+# Node
+node_modules/
+
 # macOS
 .DS_Store
 .AppleDouble
