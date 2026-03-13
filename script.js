@@ -837,8 +837,21 @@ function removeCustomProfile(country, url) {
     updateTextareaFromCheckboxes();
 }
 
+// Password gate for add-profile feature
+const ADD_PROFILE_PASSWORD = 'ITQCertifications1!';
+let addProfileUnlocked = false;
+
 // Modal logic
 function openAddProfileModal() {
+    if (!addProfileUnlocked) {
+        const input = prompt('Enter the password to add a profile:');
+        if (input !== ADD_PROFILE_PASSWORD) {
+            if (input !== null) alert('Incorrect password.');
+            return;
+        }
+        addProfileUnlocked = true;
+    }
+
     const modal = document.getElementById('add-profile-modal');
     const countrySelect = document.getElementById('modal-country');
     const newCountryGroup = document.getElementById('new-country-group');
