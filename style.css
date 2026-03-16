@@ -508,6 +508,162 @@ footer a:hover {
     text-decoration: underline;
 }
 
+/* Add Profile button */
+.add-profile-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.9rem;
+    border: 2px dashed var(--border-color);
+    border-radius: 999px;
+    background: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--secondary-color);
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.add-profile-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.add-profile-btn .plus-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+/* Modal */
+.modal {
+    border: none;
+    border-radius: 12px;
+    padding: 0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    max-width: 480px;
+    width: calc(100% - 2rem);
+}
+
+.modal::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.modal-content {
+    padding: 2rem;
+}
+
+.modal-content h3 {
+    font-size: 1.25rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+}
+
+.modal-content select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: var(--card-background);
+    transition: border-color 0.3s ease;
+    cursor: pointer;
+}
+
+.modal-content select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.modal-btn {
+    padding: 0.6rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.modal-btn--cancel {
+    background: var(--background);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.modal-btn--cancel:hover {
+    background: var(--border-color);
+}
+
+.modal-btn--save {
+    background: var(--primary-color);
+    color: white;
+}
+
+.modal-btn--save:hover {
+    background: var(--primary-hover);
+}
+
+/* Custom profile pill indicator */
+.country-pill--custom {
+    border-style: dashed;
+}
+
+.country-pill--custom:has(input:checked) {
+    border-style: solid;
+}
+
+/* Custom profiles list */
+.custom-profiles-list {
+    margin-top: 1rem;
+}
+
+.custom-profiles-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.custom-profile-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.5rem 0.25rem 0.7rem;
+    background: #e8f1ff;
+    border: 1px solid var(--primary-color);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--primary-color);
+}
+
+.custom-profile-tag small {
+    color: var(--secondary-color);
+    font-weight: 400;
+}
+
+.custom-profile-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.15rem;
+    color: var(--secondary-color);
+    transition: color 0.2s ease;
+    border-radius: 50%;
+}
+
+.custom-profile-remove:hover {
+    color: var(--error-color);
+}
+
 /* Certification table */
 .certification-table {
     width: 100%;
