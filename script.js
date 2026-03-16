@@ -58,6 +58,7 @@ const infoMessage = document.getElementById('info-message');
 const resultsSection = document.getElementById('results-section');
 const resultsTabsEl = document.getElementById('results-tabs');
 const commonGrid = document.getElementById('common-grid');
+const certificationGrid = document.getElementById('certification-grid');
 const badgesGrid = document.getElementById('badges-grid');
 const badgeCount = document.getElementById('badge-count');
 const btnText = fetchBtn.querySelector('.btn-text');
@@ -322,6 +323,7 @@ function showTab(tabName) {
         btn.classList.toggle('tab-btn--active', btn.dataset.tab === tabName);
     });
     commonGrid.style.display = tabName === 'common' ? 'grid' : 'none';
+    certificationGrid.style.display = tabName === 'by-certification' ? 'grid' : 'none';
     badgesGrid.style.display = tabName === 'by-profile' ? 'grid' : 'none';
 }
 
@@ -389,6 +391,35 @@ function createCommonCard(badge, globalIndex, holders) {
     }
 
     return card;
+}
+
+// Build and render the "By Certification" view (all certs ranked by holder count descending)
+function renderByCertification() {
+    certificationGrid.innerHTML = '';
+
+    const groups = new Map();
+    for (let i = 0; i < badges.length; i++) {
+        const badge = badges[i];
+        const key = badge.badge_template?.id || badge.badge_template?.name || badge.name;
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, { badge, globalIndex: i, holders: new Set() });
+        groups.get(key).holders.add(badge._username);
+    }
+
+    const sorted = Array.from(groups.values())
+        .sort((a, b) => b.holders.size - a.holders.size);
+
+    if (sorted.length === 0) {
+        const msg = document.createElement('p');
+        msg.className = 'no-common-msg';
+        msg.textContent = 'No certifications found.';
+        certificationGrid.appendChild(msg);
+        return;
+    }
+
+    for (const { badge, globalIndex, holders } of sorted) {
+        certificationGrid.appendChild(createCommonCard(badge, globalIndex, holders));
+    }
 }
 
 // Sanitize filename
@@ -472,6 +503,7 @@ async function handleFetchBadges() {
     hideMessages();
     badgesGrid.innerHTML = '';
     commonGrid.innerHTML = '';
+    certificationGrid.innerHTML = '';
     resultsTabsEl.style.display = 'none';
     badgesGrid.style.display = 'grid';
     resultsSection.style.display = 'none';
@@ -549,10 +581,11 @@ async function handleFetchBadges() {
 
         badgeCount.textContent = `(${badges.length})`;
 
-        // Show Common Certifications tab if 2+ distinct profiles have results
+        // Show tabs if 2+ distinct profiles have results
         const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
         if (distinctProfiles >= 2) {
             renderCommonCertifications();
+            renderByCertification();
             resultsTabsEl.style.display = 'flex';
             showTab('common');
         }
