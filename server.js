@@ -79,17 +79,28 @@ function setCache(key, buffer, contentType) {
 }
 
 // --- Credly Proxy (with cache) ---
+// Accepts ?url=<full credly URL> to support both www.credly.com and images.credly.com
 
-app.get('/api/credly/*', (req, res) => {
-    const credlyPath = req.params[0];
-    const cached = getCached(credlyPath);
+const ALLOWED_CREDLY_HOSTS = ['www.credly.com', 'credly.com', 'images.credly.com'];
+
+app.get('/api/credly', (req, res) => {
+    const credlyUrl = req.query.url;
+    if (!credlyUrl) return res.status(400).json({ error: 'Missing url parameter' });
+
+    let parsed;
+    try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
+        return res.status(403).json({ error: 'URL must be from credly.com' });
+    }
+
+    const cacheKey = credlyUrl;
+    const cached = getCached(cacheKey);
     if (cached) {
         res.set('Content-Type', cached.contentType);
         res.set('X-Cache', 'HIT');
         return res.send(cached.buffer);
     }
 
-    const credlyUrl = `https://www.credly.com/${credlyPath}`;
     https.get(credlyUrl, {
         headers: {
             'Accept': 'application/json',
@@ -107,7 +118,7 @@ app.get('/api/credly/*', (req, res) => {
         upstream.on('end', () => {
             const buffer = Buffer.concat(chunks);
             const contentType = upstream.headers['content-type'] || 'application/octet-stream';
-            setCache(credlyPath, buffer, contentType);
+            setCache(cacheKey, buffer, contentType);
             res.set('Content-Type', contentType);
             res.set('X-Cache', 'MISS');
             res.send(buffer);

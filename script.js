@@ -152,9 +152,7 @@ function normalizeProfileUrl(url) {
 
 // Fetch a Credly URL through the server-side proxy
 async function fetchCredly(credlyUrl) {
-    // Convert https://www.credly.com/foo/bar → /api/credly/foo/bar
-    const path = credlyUrl.replace(/^https?:\/\/(?:www\.)?credly\.com\//, '');
-    const response = await fetch(`/api/credly/${path}`);
+    const response = await fetch(`/api/credly?url=${encodeURIComponent(credlyUrl)}`);
     if (!response.ok) {
         throw new Error(`Credly request failed (${response.status})`);
     }

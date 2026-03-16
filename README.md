@@ -6,38 +6,64 @@ Available as both a **web app** and **command-line tool**.
 
 ## Web App
 
-**Try it now:** [https://floriancasse.github.io/credly-scraper](https://floriancasse.github.io/credly-scraper)
+**Live at:** [https://credlyscraper.florian-casse.fr](https://credlyscraper.florian-casse.fr)
 
-The web app runs entirely in your browser — no installation required!
-
-> **Note:** The app uses CORS proxies to fetch data from Credly's API since direct browser requests are blocked by CORS policies. The app tries direct requests first, falling back to proxies if needed.
+Self-hosted on a dedicated server with an Express.js backend — no third-party CORS proxies needed.
 
 ### Features
 
 - **Multiple profiles** — Paste one Credly profile URL per line to scrape several people at once
-- **Country quick-select** — One-click checkboxes to load predefined profiles for France, Belgium, and Luxembourg
+- **Country quick-select** — One-click checkboxes to load predefined profiles for France, Belgium, Luxembourg, Germany, and Netherlands
+- **Self-service profile registration** — Add your own Credly profile via a modal dialog (password-protected)
 - **Common Certifications view** — When multiple profiles are loaded, see which certifications are shared across people, sorted by number of holders
+- **By Certification view** — Table ranking all certifications by number of holders
 - **By Profile view** — Browse all certifications organised per person
 - **Keyword filter** — Type a keyword (e.g. VMware, AWS, Azure) to only show matching certifications
 - **Date filter** — Only show certifications issued after a given date
 - **CSV export** — Download the full list as a CSV file (columns: Profile, Name, Issuer, Issued At, Expires At, Badge URL, Image URL)
 - **ZIP download** — Download all badge images at once as a ZIP, organised into per-profile subfolders
 - **Individual download** — Download any single badge image directly
-- **Customisable dimensions** — Set your own output width and height (default: 512×254 px)
-- **Automatic image processing** — Badges are resized and centred on a transparent canvas at your chosen dimensions
+- **Automatic image processing** — Badges are resized and centred on a transparent canvas (512x254 px)
 - **Display names** — People are shown by their first and last name, not their username
-- **100% client-side** — Your data never leaves your browser (except API calls through a CORS proxy)
+- **Server-side Credly proxy** — All API and image requests go through the backend with in-memory caching (1h for JSON, 24h for images)
+- **Image deduplication** — Shared badge images across profiles are fetched only once
 - **Responsive design** — Works on desktop and mobile
+
+### Architecture
+
+```
+Browser  →  Nginx (:8080)  →  Express.js (:3002)  →  Credly API / CDN
+                                    ↕
+                           In-memory cache (100 MB LRU)
+                           Profile storage (JSON file)
+```
+
+- **Frontend**: Static HTML/CSS/JS served by Express
+- **Backend API**:
+  - `GET /api/credly?url=<credly-url>` — Cached proxy to Credly (supports www.credly.com and images.credly.com)
+  - `GET /api/profiles` — List custom profiles
+  - `POST /api/profiles` — Add a profile (password-protected)
+  - `DELETE /api/profiles` — Remove a profile (password-protected)
+  - `GET /api/cache-stats` — Cache monitoring endpoint
+- **Deployment**: systemd service (`credly-scraper.service`) behind Nginx reverse proxy
 
 ### How to Use
 
-1. Visit the [web app](https://floriancasse.github.io/credly-scraper)
+1. Visit [credlyscraper.florian-casse.fr](https://credlyscraper.florian-casse.fr)
 2. Use the country quick-select checkboxes **or** paste Credly profile URLs manually (one per line)
 3. Optionally set a keyword filter and/or an "issued after" date
-4. Optionally adjust the output dimensions
-5. Click **Fetch Badges** (or press **Ctrl+Enter**)
-6. Switch between **Common Certifications** and **By Profile** tabs
-7. Export as CSV or download images individually / as a ZIP
+4. Click **Fetch Badges** (or press **Ctrl+Enter**)
+5. Switch between **Common Certifications**, **By Certification**, and **By Profile** tabs
+6. Export as CSV or download images individually / as a ZIP
+
+### Self-Hosting
+
+```bash
+git clone https://github.com/FlorianCasse/credly-scraper.git
+cd credly-scraper
+npm install
+APP_PASSWORD=yourpassword PORT=3002 npm start
+```
 
 ---
 
@@ -51,8 +77,8 @@ A shell script for macOS that downloads all badges from a Credly profile, perfor
 - Performs OCR on badge images to extract text
 - Automatically renames badges based on OCR results
 - Processes images using ImageMagick CLI tools:
-  - Resizes images to fit within 512×254 pixels (maintaining aspect ratio)
-  - Centres images on a 512×254 transparent canvas
+  - Resizes images to fit within 512x254 pixels (maintaining aspect ratio)
+  - Centres images on a 512x254 transparent canvas
   - Exports as PNG with transparency
 - Organises output into structured directories
 
@@ -111,8 +137,8 @@ credly_badges_username_20231022_143000/
 
 The script replicates the GIMP workflow using ImageMagick CLI tools:
 
-1. **Resize**: Images are resized to fit within 512×254 pixels while maintaining aspect ratio
-2. **Canvas**: Creates a 512×254 pixel canvas with transparent background
+1. **Resize**: Images are resized to fit within 512x254 pixels while maintaining aspect ratio
+2. **Canvas**: Creates a 512x254 pixel canvas with transparent background
 3. **Center**: Centres the resized image on the canvas
 4. **Export**: Saves as PNG with transparency preserved
 
