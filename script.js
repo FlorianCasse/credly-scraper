@@ -42,6 +42,11 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/sestegra',
         'https://www.credly.com/users/valentin-collin.88f97edb',
     ],
+    'Germany': [
+        'https://www.credly.com/users/malte-wilhelm',
+    ],
+    'Netherlands': [
+    ],
 };
 
 // DOM elements
