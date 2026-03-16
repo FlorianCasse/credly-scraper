@@ -35,29 +35,94 @@ function normalizeUrl(url) {
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
 }
 
-// --- Credly Proxy ---
-// Server-side proxy to Credly API — eliminates the need for third-party CORS proxies
+// --- In-Memory Cache ---
+const cache = new Map();
+const MAX_CACHE_BYTES = 100 * 1024 * 1024; // 100 MB
+const TTL_JSON = 60 * 60 * 1000;           // 1 hour
+const TTL_IMAGE = 24 * 60 * 60 * 1000;     // 24 hours
+let currentCacheBytes = 0;
+
+function getCacheTTL(contentType) {
+    if (contentType && contentType.startsWith('image/')) return TTL_IMAGE;
+    return TTL_JSON;
+}
+
+function evictIfNeeded() {
+    if (currentCacheBytes <= MAX_CACHE_BYTES) return;
+    const entries = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    for (const [key, entry] of entries) {
+        if (currentCacheBytes <= MAX_CACHE_BYTES) break;
+        currentCacheBytes -= entry.size;
+        cache.delete(key);
+    }
+}
+
+function getCached(key) {
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > getCacheTTL(entry.contentType)) {
+        currentCacheBytes -= entry.size;
+        cache.delete(key);
+        return null;
+    }
+    entry.lastAccess = Date.now();
+    return entry;
+}
+
+function setCache(key, buffer, contentType) {
+    const existing = cache.get(key);
+    if (existing) currentCacheBytes -= existing.size;
+    const size = buffer.length;
+    cache.set(key, { buffer, contentType, timestamp: Date.now(), lastAccess: Date.now(), size });
+    currentCacheBytes += size;
+    evictIfNeeded();
+}
+
+// --- Credly Proxy (with cache) ---
 
 app.get('/api/credly/*', (req, res) => {
-    // Extract the Credly path after /api/credly/
     const credlyPath = req.params[0];
-    const credlyUrl = `https://www.credly.com/${credlyPath}`;
+    const cached = getCached(credlyPath);
+    if (cached) {
+        res.set('Content-Type', cached.contentType);
+        res.set('X-Cache', 'HIT');
+        return res.send(cached.buffer);
+    }
 
+    const credlyUrl = `https://www.credly.com/${credlyPath}`;
     https.get(credlyUrl, {
         headers: {
             'Accept': 'application/json',
             'User-Agent': 'Mozilla/5.0 (compatible; CredlyScraper/1.0)',
         }
     }, (upstream) => {
-        res.status(upstream.statusCode);
-        // Forward content-type
-        if (upstream.headers['content-type']) {
-            res.set('Content-Type', upstream.headers['content-type']);
+        if (upstream.statusCode !== 200) {
+            res.status(upstream.statusCode);
+            if (upstream.headers['content-type']) res.set('Content-Type', upstream.headers['content-type']);
+            upstream.pipe(res);
+            return;
         }
-        upstream.pipe(res);
+        const chunks = [];
+        upstream.on('data', chunk => chunks.push(chunk));
+        upstream.on('end', () => {
+            const buffer = Buffer.concat(chunks);
+            const contentType = upstream.headers['content-type'] || 'application/octet-stream';
+            setCache(credlyPath, buffer, contentType);
+            res.set('Content-Type', contentType);
+            res.set('X-Cache', 'MISS');
+            res.send(buffer);
+        });
     }).on('error', (err) => {
         console.error('Credly proxy error:', err.message);
         res.status(502).json({ error: 'Failed to reach Credly' });
+    });
+});
+
+app.get('/api/cache-stats', (req, res) => {
+    res.json({
+        entries: cache.size,
+        sizeMB: (currentCacheBytes / (1024 * 1024)).toFixed(2),
+        maxMB: (MAX_CACHE_BYTES / (1024 * 1024)).toFixed(0),
     });
 });
 

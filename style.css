@@ -156,8 +156,7 @@ header h1 {
     color: var(--secondary-color);
 }
 
-.filters-group,
-.dimensions-group {
+.filters-group {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
@@ -542,6 +541,11 @@ footer a:hover {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
     max-width: 480px;
     width: calc(100% - 2rem);
+    margin: auto;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
 }
 
 .modal::backdrop {
@@ -717,8 +721,7 @@ footer a:hover {
         font-size: 2rem;
     }
 
-    .filters-group,
-    .dimensions-group {
+    .filters-group {
         grid-template-columns: 1fr;
     }
 

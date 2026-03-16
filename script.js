@@ -2,6 +2,7 @@
 let badges = [];
 let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
+const imageCache = new Map(); // imageUrl -> Promise<canvas> (deduplication)
 
 // Custom profiles from server API
 let cachedCustomProfiles = null;
@@ -89,8 +90,6 @@ const PREDEFINED_PROFILES = {
 
 // DOM elements
 const profileUrlInput = document.getElementById('profile-url');
-const widthInput = document.getElementById('width');
-const heightInput = document.getElementById('height');
 const filterKeywordInput = document.getElementById('filter-keyword');
 const filterDateInput = document.getElementById('filter-date');
 const fetchBtn = document.getElementById('fetch-btn');
@@ -243,49 +242,20 @@ async function fetchBadges(username) {
     return allBadges;
 }
 
-// Load and process image
+// Load and process image via server proxy
 async function loadAndProcessImage(imageUrl, targetWidth, targetHeight) {
-    const strategies = [
-        () => loadImageDirect(imageUrl),
-        () => loadImageViaProxy(imageUrl),
-    ];
-
-    let lastError = null;
-    for (const strategy of strategies) {
-        try {
-            const img = await strategy();
-            return processImage(img, targetWidth, targetHeight);
-        } catch (error) {
-            lastError = error;
-        }
-    }
-
-    throw lastError || new Error('Failed to load image');
-}
-
-// Direct image loading
-function loadImageDirect(imageUrl) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error('Direct load failed'));
-        img.src = imageUrl;
-    });
-}
-
-// Load image via CORS proxy
-async function loadImageViaProxy(imageUrl) {
     const response = await fetchCredly(imageUrl);
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
 
-    return new Promise((resolve, reject) => {
+    const img = await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => { URL.revokeObjectURL(objectUrl); resolve(img); };
-        img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Proxy load failed')); };
+        img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image load failed')); };
         img.src = objectUrl;
     });
+
+    return processImage(img, targetWidth, targetHeight);
 }
 
 // Process image on canvas
@@ -514,7 +484,20 @@ async function processOneProfile(username, container, keyword, filterDate, targe
             }
 
             try {
-                const canvas = await loadAndProcessImage(imageUrl, targetWidth, targetHeight);
+                // Deduplicate: reuse in-flight or resolved promise for same image URL
+                let canvasPromise = imageCache.get(imageUrl);
+                if (!canvasPromise) {
+                    canvasPromise = loadAndProcessImage(imageUrl, targetWidth, targetHeight);
+                    imageCache.set(imageUrl, canvasPromise);
+                }
+                const originalCanvas = await canvasPromise;
+
+                // Clone canvas since each card needs its own DOM node
+                const canvas = document.createElement('canvas');
+                canvas.width = originalCanvas.width;
+                canvas.height = originalCanvas.height;
+                canvas.getContext('2d').drawImage(originalCanvas, 0, 0);
+
                 processedBadges[globalIndex] = canvas;
                 imgContainer.innerHTML = '';
                 imgContainer.appendChild(canvas);
@@ -538,14 +521,15 @@ async function handleFetchBadges() {
     badgesGrid.style.display = 'grid';
     resultsSection.style.display = 'none';
     badges = [];
+    imageCache.clear();
     processedBadges = [];
     userDisplayNames = {};
 
     const rawInput = profileUrlInput.value.trim();
     const keyword = filterKeywordInput.value.trim();
     const filterDate = filterDateInput.value ? new Date(filterDateInput.value) : null;
-    const targetWidth = parseInt(widthInput.value) || 512;
-    const targetHeight = parseInt(heightInput.value) || 254;
+    const targetWidth = 512;
+    const targetHeight = 254;
 
     if (!rawInput) {
         showError('Please enter at least one Credly profile URL');
@@ -579,8 +563,8 @@ async function handleFetchBadges() {
         showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} in parallel...`);
 
         // Max 5 profiles fetched simultaneously, max 4 images loaded simultaneously
-        const profileLimit = createConcurrencyLimiter(5);
-        const imageLimit = createConcurrencyLimiter(4);
+        const profileLimit = createConcurrencyLimiter(8);
+        const imageLimit = createConcurrencyLimiter(10);
 
         // Pre-create one container div per profile to preserve display order
         // regardless of which profile finishes first
