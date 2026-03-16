@@ -3,6 +3,8 @@ let badges = [];
 let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
 const imageCache = new Map(); // imageUrl -> Promise<canvas> (deduplication)
+let tabsDirty = false; // true when badges data changed since last tab render
+let renderedTabs = { common: false, 'by-certification': false };
 
 // Custom profiles from server API
 let cachedCustomProfiles = null;
@@ -338,7 +340,7 @@ function createBadgeCard(badge, canvas, index) {
     return card;
 }
 
-// Switch between "common" and "by-profile" tabs
+// Switch between "common" and "by-profile" tabs (lazy render)
 function showTab(tabName) {
     resultsTabsEl.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.toggle('tab-btn--active', btn.dataset.tab === tabName);
@@ -346,6 +348,17 @@ function showTab(tabName) {
     commonGrid.style.display = tabName === 'common' ? 'grid' : 'none';
     certificationGrid.style.display = tabName === 'by-certification' ? 'block' : 'none';
     badgesGrid.style.display = tabName === 'by-profile' ? 'grid' : 'none';
+
+    // Lazy render: only compute when tab is first shown or data changed
+    if (tabName === 'common' && (tabsDirty || !renderedTabs.common)) {
+        renderCommonCertifications();
+        renderedTabs.common = true;
+    }
+    if (tabName === 'by-certification' && (tabsDirty || !renderedTabs['by-certification'])) {
+        renderByCertification();
+        renderedTabs['by-certification'] = true;
+    }
+    if (tabsDirty) tabsDirty = false;
 }
 
 // Build and render the "Common Certifications" view
@@ -534,7 +547,7 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
     ));
 }
 
-// Handle fetch badges
+// Handle fetch badges (SSE streaming)
 async function handleFetchBadges() {
     hideMessages();
     badgesGrid.innerHTML = '';
@@ -547,6 +560,8 @@ async function handleFetchBadges() {
     imageCache.clear();
     processedBadges = [];
     userDisplayNames = {};
+    tabsDirty = false;
+    renderedTabs = { common: false, 'by-certification': false };
 
     const rawInput = profileUrlInput.value.trim();
     const keyword = filterKeywordInput.value.trim();
@@ -587,63 +602,137 @@ async function handleFetchBadges() {
 
         const imageLimit = createConcurrencyLimiter(10);
 
-        // Batch fetch all profile data in one server request
-        const res = await fetch('/api/batch-badges', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usernames }),
-        });
-        if (!res.ok) throw new Error('Batch fetch failed');
-        const batchResults = await res.json();
-
         // Pre-create one container div per profile to preserve display order
-        const profileContainers = usernames.map(() => {
+        const profileContainers = {};
+        for (const username of usernames) {
             const div = document.createElement('div');
             badgesGrid.appendChild(div);
-            return div;
-        });
+            profileContainers[username] = div;
+        }
 
-        // Render all profiles and load images in parallel
-        await Promise.allSettled(
-            batchResults.map((result, i) => {
+        // Track render promises to wait for all images
+        const renderPromises = [];
+        let profilesReceived = 0;
+
+        // Stream profiles via SSE
+        await new Promise((resolve, reject) => {
+            const url = `/api/batch-badges-stream?usernames=${encodeURIComponent(usernames.join(','))}`;
+            const eventSource = new EventSource(url);
+
+            eventSource.onmessage = (event) => {
+                const result = JSON.parse(event.data);
+                profilesReceived++;
+                showInfo(`Received ${profilesReceived}/${usernames.length} profiles...`);
+
+                const container = profileContainers[result.username];
+                if (!container) return;
+
                 if (result.error) {
                     const errHeader = document.createElement('div');
                     errHeader.className = 'profile-header profile-header--error';
                     errHeader.textContent = `${result.username} — Failed: ${result.error}`;
-                    profileContainers[i].appendChild(errHeader);
-                    return Promise.resolve();
+                    container.appendChild(errHeader);
+                    return;
                 }
-                return renderOneProfile(
+
+                const promise = renderOneProfile(
                     result.username, result.displayName, result.badges,
-                    profileContainers[i],
+                    container,
                     keyword, filterDate,
                     targetWidth, targetHeight,
                     imageLimit
-                ).catch(err => {
+                ).then(() => {
+                    tabsDirty = true;
+                    badgeCount.textContent = `(${badges.length})`;
+
+                    // Show tabs as soon as 2+ profiles have results
+                    const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
+                    if (distinctProfiles >= 2 && resultsTabsEl.style.display !== 'flex') {
+                        resultsTabsEl.style.display = 'flex';
+                        showTab('common');
+                    }
+                }).catch(err => {
                     const errHeader = document.createElement('div');
                     errHeader.className = 'profile-header profile-header--error';
                     errHeader.textContent = `${result.username} — Failed: ${err.message}`;
-                    profileContainers[i].appendChild(errHeader);
+                    container.appendChild(errHeader);
                 });
-            })
-        );
+                renderPromises.push(promise);
+            };
+
+            eventSource.addEventListener('done', () => {
+                eventSource.close();
+                resolve();
+            });
+
+            eventSource.onerror = () => {
+                eventSource.close();
+                // If we received nothing, fall back to POST endpoint
+                if (profilesReceived === 0) {
+                    reject(new Error('SSE stream failed'));
+                } else {
+                    resolve(); // partial success
+                }
+            };
+        });
+
+        // Wait for all in-flight image renders to complete
+        await Promise.allSettled(renderPromises);
 
         badgeCount.textContent = `(${badges.length})`;
 
-        // Show tabs if 2+ distinct profiles have results
+        // Final tab state: show tabs if 2+ profiles, and re-render active tab
         const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
         if (distinctProfiles >= 2) {
-            renderCommonCertifications();
-            renderByCertification();
+            tabsDirty = true;
             resultsTabsEl.style.display = 'flex';
-            showTab('common');
+            const activeTab = getActiveTab();
+            showTab(activeTab === 'by-profile' ? 'common' : activeTab);
         }
 
         hideMessages();
         setLoading(false);
 
     } catch (error) {
-        showError(error.message);
+        // Fallback to POST batch endpoint
+        try {
+            const imageLimit = createConcurrencyLimiter(10);
+            const res = await fetch('/api/batch-badges', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usernames }),
+            });
+            if (!res.ok) throw new Error('Batch fetch failed');
+            const batchResults = await res.json();
+
+            for (const result of batchResults) {
+                const container = document.createElement('div');
+                badgesGrid.appendChild(container);
+                if (result.error) {
+                    const errHeader = document.createElement('div');
+                    errHeader.className = 'profile-header profile-header--error';
+                    errHeader.textContent = `${result.username} — Failed: ${result.error}`;
+                    container.appendChild(errHeader);
+                    continue;
+                }
+                await renderOneProfile(
+                    result.username, result.displayName, result.badges,
+                    container, keyword, filterDate,
+                    targetWidth, targetHeight, imageLimit
+                );
+            }
+
+            badgeCount.textContent = `(${badges.length})`;
+            const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
+            if (distinctProfiles >= 2) {
+                tabsDirty = true;
+                resultsTabsEl.style.display = 'flex';
+                showTab('common');
+            }
+            hideMessages();
+        } catch (fallbackError) {
+            showError(fallbackError.message);
+        }
         setLoading(false);
     }
 }

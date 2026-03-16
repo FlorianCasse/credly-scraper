@@ -137,6 +137,28 @@ app.get('/api/cache-stats', (req, res) => {
     });
 });
 
+// --- Concurrency Limiter ---
+
+function createConcurrencyLimiter(max) {
+    let running = 0;
+    const queue = [];
+    return function limit(fn) {
+        return new Promise((resolve, reject) => {
+            const run = async () => {
+                running++;
+                try { resolve(await fn()); }
+                catch (e) { reject(e); }
+                finally {
+                    running--;
+                    if (queue.length > 0) queue.shift()();
+                }
+            };
+            if (running < max) run();
+            else queue.push(run);
+        });
+    };
+}
+
 // --- Batch Badges Endpoint ---
 // Fetches profile info + all badges for multiple usernames in one request
 
@@ -202,14 +224,15 @@ app.post('/api/batch-badges', async (req, res) => {
         return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
     }
 
+    const limit = createConcurrencyLimiter(10);
     const results = await Promise.allSettled(
-        usernames.map(async (username) => {
+        usernames.map((username) => limit(async () => {
             const [displayName, badges] = await Promise.all([
                 fetchDisplayName(username),
                 fetchAllBadges(username),
             ]);
             return { username, displayName, badges };
-        })
+        }))
     );
 
     const response = results.map((r, i) => {
@@ -218,6 +241,53 @@ app.post('/api/batch-badges', async (req, res) => {
     });
 
     res.json(response);
+});
+
+// --- SSE Streaming Batch Endpoint ---
+
+app.get('/api/batch-badges-stream', (req, res) => {
+    const raw = req.query.usernames;
+    if (!raw) return res.status(400).json({ error: 'usernames query parameter is required' });
+
+    const usernames = raw.split(',').map(u => u.trim()).filter(Boolean);
+    if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
+    if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+    });
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    const limit = createConcurrencyLimiter(10);
+    let completed = 0;
+
+    usernames.forEach((username) => {
+        limit(async () => {
+            if (closed) return;
+            try {
+                const [displayName, badges] = await Promise.all([
+                    fetchDisplayName(username),
+                    fetchAllBadges(username),
+                ]);
+                if (!closed) {
+                    res.write(`data: ${JSON.stringify({ username, displayName, badges })}\n\n`);
+                }
+            } catch (err) {
+                if (!closed) {
+                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: err.message })}\n\n`);
+                }
+            }
+            completed++;
+            if (completed === usernames.length && !closed) {
+                res.write('event: done\ndata: {}\n\n');
+                res.end();
+            }
+        });
+    });
 });
 
 // --- Profile API Routes ---
@@ -290,6 +360,61 @@ app.delete('/api/profiles', (req, res) => {
 fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
 if (!fs.existsSync(DATA_FILE)) writeProfiles({});
 
+// --- Cache Prewarm ---
+
+function getAllPredefinedUsernames() {
+    try {
+        const custom = readProfiles();
+        const allUrls = [];
+        // Hardcoded predefined profiles (mirror of script.js PREDEFINED_PROFILES)
+        const predefined = {
+            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam'],
+            'Belgium': ['alexandre-francois.18d3df90','andy-ayite-zonor','igor-jemuce','jan-horrix','kevin-burgers','michael-van-de-gaer','michielpeene','stijnvermoesen','sven-cranshoff','wannes-de-boodt','yason-prufer'],
+            'Luxembourg': ['amaury-sobaco.abfaee41','davy-stoffel','franki-sohmoe-kamte','miguel-brasseur.18fd467e','sestegra','valentin-collin.88f97edb'],
+            'Germany': ['malte-wilhelm'],
+            'Netherlands': ['albin-qorri.fcfad0f5','arie-jan-bodde','bart-lievers','bart-mulder','bavo-van-der-krieken.62003c0a','danny-rotmeijer','davy-van-de-laar.906902d4','ddejong','dennis-lefeber','dennis-mertens','dirk-jan-alken','eric-honcoop','eric-sloof','erik-verbruggen','gemma-van-der-voorst','hans-lenze-kaper.76804f63','jeroen-buren','kabir-ali.62af15df','luuk-giesbers.91b12124','mitchel-van-ballegooij','paul-van-dieen','rick-verstegen','robert-cranendonk','robin-van-altena','sam-vieillard','sjaak-bakker','toine-eetgerink','vincent-jansen.29312768','vincent-van-vierzen','wesley-van-ede','wesley-geelhoed'],
+        };
+        for (const usernames of Object.values(predefined)) allUrls.push(...usernames);
+        // Add custom profiles
+        for (const urls of Object.values(custom)) {
+            for (const url of urls) {
+                const match = url.match(/\/users\/([^\/\s#?]+)/i);
+                if (match) allUrls.push(match[1]);
+            }
+        }
+        return [...new Set(allUrls)];
+    } catch { return []; }
+}
+
+async function prewarmCache() {
+    const usernames = getAllPredefinedUsernames();
+    if (usernames.length === 0) return;
+    console.log(`[prewarm] Warming cache for ${usernames.length} profiles...`);
+
+    const limit = createConcurrencyLimiter(5);
+    let done = 0;
+
+    await Promise.allSettled(
+        usernames.map((username) => limit(async () => {
+            try {
+                await Promise.all([
+                    fetchDisplayName(username),
+                    fetchAllBadges(username),
+                ]);
+            } catch (err) {
+                console.warn(`[prewarm] Failed for ${username}: ${err.message}`);
+            }
+            done++;
+            if (done % 10 === 0 || done === usernames.length) {
+                console.log(`[prewarm] ${done}/${usernames.length} profiles cached`);
+            }
+        }))
+    );
+
+    console.log('[prewarm] Cache warming complete');
+}
+
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    prewarmCache();
 });
