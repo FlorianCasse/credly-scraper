@@ -113,36 +113,15 @@ function normalizeProfileUrl(url) {
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
 }
 
-// CORS proxies — skip direct requests (Credly always blocks CORS from browsers)
-const CORS_PROXIES = [
-    (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-];
-
-// Track which proxy index worked last so we try it first next time
-let lastWorkingProxyIndex = 0;
-
-// Fetch a Credly URL through CORS proxies with sticky preference
+// Fetch a Credly URL through the server-side proxy
 async function fetchCredly(credlyUrl) {
-    const order = [
-        lastWorkingProxyIndex,
-        ...Array.from({ length: CORS_PROXIES.length }, (_, i) => i).filter(i => i !== lastWorkingProxyIndex),
-    ];
-
-    let lastError = null;
-    for (const i of order) {
-        try {
-            const response = await fetch(CORS_PROXIES[i](credlyUrl));
-            if (response.ok) {
-                lastWorkingProxyIndex = i;
-                return response;
-            }
-        } catch (err) {
-            lastError = err;
-        }
+    // Convert https://www.credly.com/foo/bar → /api/credly/foo/bar
+    const path = credlyUrl.replace(/^https?:\/\/(?:www\.)?credly\.com\//, '');
+    const response = await fetch(`/api/credly/${path}`);
+    if (!response.ok) {
+        throw new Error(`Credly request failed (${response.status})`);
     }
-    throw lastError || new Error('All CORS proxies failed');
+    return response;
 }
 
 // Fetch first/last name for a Credly username (best-effort, falls back to username)
