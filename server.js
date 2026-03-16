@@ -137,6 +137,89 @@ app.get('/api/cache-stats', (req, res) => {
     });
 });
 
+// --- Batch Badges Endpoint ---
+// Fetches profile info + all badges for multiple usernames in one request
+
+function fetchUrl(url) {
+    const cacheKey = url;
+    const cached = getCached(cacheKey);
+    if (cached) return Promise.resolve(JSON.parse(cached.buffer.toString()));
+
+    return new Promise((resolve, reject) => {
+        https.get(url, {
+            headers: {
+                'Accept': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (compatible; CredlyScraper/1.0)',
+            }
+        }, (upstream) => {
+            if (upstream.statusCode !== 200) {
+                upstream.resume();
+                return reject(new Error(`HTTP ${upstream.statusCode}`));
+            }
+            const chunks = [];
+            upstream.on('data', chunk => chunks.push(chunk));
+            upstream.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                const contentType = upstream.headers['content-type'] || 'application/json';
+                setCache(cacheKey, buffer, contentType);
+                try { resolve(JSON.parse(buffer.toString())); }
+                catch { reject(new Error('Invalid JSON')); }
+            });
+        }).on('error', reject);
+    });
+}
+
+async function fetchAllBadges(username) {
+    const allBadges = [];
+    let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
+    while (nextUrl) {
+        const data = await fetchUrl(nextUrl);
+        if (!data.data) break;
+        allBadges.push(...data.data);
+        nextUrl = data.metadata?.next_page_url || null;
+    }
+    return allBadges;
+}
+
+async function fetchDisplayName(username) {
+    try {
+        const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
+        const user = data.data;
+        if (user) {
+            const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+            return fullName || username;
+        }
+    } catch { /* fall through */ }
+    return username;
+}
+
+app.post('/api/batch-badges', async (req, res) => {
+    const { usernames } = req.body;
+    if (!Array.isArray(usernames) || usernames.length === 0) {
+        return res.status(400).json({ error: 'usernames array is required' });
+    }
+    if (usernames.length > 100) {
+        return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    }
+
+    const results = await Promise.allSettled(
+        usernames.map(async (username) => {
+            const [displayName, badges] = await Promise.all([
+                fetchDisplayName(username),
+                fetchAllBadges(username),
+            ]);
+            return { username, displayName, badges };
+        })
+    );
+
+    const response = results.map((r, i) => {
+        if (r.status === 'fulfilled') return r.value;
+        return { username: usernames[i], displayName: usernames[i], badges: [], error: r.reason?.message };
+    });
+
+    res.json(response);
+});
+
 // --- Profile API Routes ---
 
 // Get all custom profiles (public, no auth needed)

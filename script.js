@@ -85,6 +85,37 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/malte-wilhelm',
     ],
     'Netherlands': [
+        'https://www.credly.com/users/albin-qorri.fcfad0f5',
+        'https://www.credly.com/users/arie-jan-bodde',
+        'https://www.credly.com/users/bart-lievers',
+        'https://www.credly.com/users/bart-mulder',
+        'https://www.credly.com/users/bavo-van-der-krieken.62003c0a',
+        'https://www.credly.com/users/danny-rotmeijer',
+        'https://www.credly.com/users/davy-van-de-laar.906902d4',
+        'https://www.credly.com/users/ddejong',
+        'https://www.credly.com/users/dennis-lefeber',
+        'https://www.credly.com/users/dennis-mertens',
+        'https://www.credly.com/users/dirk-jan-alken',
+        'https://www.credly.com/users/eric-honcoop',
+        'https://www.credly.com/users/eric-sloof',
+        'https://www.credly.com/users/erik-verbruggen',
+        'https://www.credly.com/users/gemma-van-der-voorst',
+        'https://www.credly.com/users/hans-lenze-kaper.76804f63',
+        'https://www.credly.com/users/jeroen-buren',
+        'https://www.credly.com/users/kabir-ali.62af15df',
+        'https://www.credly.com/users/luuk-giesbers.91b12124',
+        'https://www.credly.com/users/mitchel-van-ballegooij',
+        'https://www.credly.com/users/paul-van-dieen',
+        'https://www.credly.com/users/rick-verstegen',
+        'https://www.credly.com/users/robert-cranendonk',
+        'https://www.credly.com/users/robin-van-altena',
+        'https://www.credly.com/users/sam-vieillard',
+        'https://www.credly.com/users/sjaak-bakker',
+        'https://www.credly.com/users/toine-eetgerink',
+        'https://www.credly.com/users/vincent-jansen.29312768',
+        'https://www.credly.com/users/vincent-van-vierzen',
+        'https://www.credly.com/users/wesley-van-ede',
+        'https://www.credly.com/users/wesley-geelhoed',
     ],
 };
 
@@ -429,14 +460,8 @@ function sanitizeFilename(name) {
         .substring(0, 100);
 }
 
-// Fetch and render a single profile into its pre-created container
-async function processOneProfile(username, container, keyword, filterDate, targetWidth, targetHeight, imageLimit) {
-    // Fetch display name and all badge pages concurrently
-    const [displayName, rawBadges] = await Promise.all([
-        fetchUserProfile(username),
-        fetchBadges(username),
-    ]);
-
+// Render a single profile into its pre-created container (data already fetched)
+async function renderOneProfile(username, displayName, rawBadges, container, keyword, filterDate, targetWidth, targetHeight, imageLimit) {
     userDisplayNames[username] = displayName;
 
     // Apply keyword + date filters
@@ -558,37 +583,49 @@ async function handleFetchBadges() {
     try {
         setLoading(true);
         resultsSection.style.display = 'block';
-        showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} in parallel...`);
+        showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} from server...`);
 
-        // Max 5 profiles fetched simultaneously, max 4 images loaded simultaneously
-        const profileLimit = createConcurrencyLimiter(8);
         const imageLimit = createConcurrencyLimiter(10);
 
+        // Batch fetch all profile data in one server request
+        const res = await fetch('/api/batch-badges', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames }),
+        });
+        if (!res.ok) throw new Error('Batch fetch failed');
+        const batchResults = await res.json();
+
         // Pre-create one container div per profile to preserve display order
-        // regardless of which profile finishes first
         const profileContainers = usernames.map(() => {
             const div = document.createElement('div');
             badgesGrid.appendChild(div);
             return div;
         });
 
-        // Fetch and render all profiles in parallel
+        // Render all profiles and load images in parallel
         await Promise.allSettled(
-            usernames.map((username, i) =>
-                profileLimit(() =>
-                    processOneProfile(
-                        username, profileContainers[i],
-                        keyword, filterDate,
-                        targetWidth, targetHeight,
-                        imageLimit
-                    ).catch(err => {
-                        const errHeader = document.createElement('div');
-                        errHeader.className = 'profile-header profile-header--error';
-                        errHeader.textContent = `${username} — Failed: ${err.message}`;
-                        profileContainers[i].appendChild(errHeader);
-                    })
-                )
-            )
+            batchResults.map((result, i) => {
+                if (result.error) {
+                    const errHeader = document.createElement('div');
+                    errHeader.className = 'profile-header profile-header--error';
+                    errHeader.textContent = `${result.username} — Failed: ${result.error}`;
+                    profileContainers[i].appendChild(errHeader);
+                    return Promise.resolve();
+                }
+                return renderOneProfile(
+                    result.username, result.displayName, result.badges,
+                    profileContainers[i],
+                    keyword, filterDate,
+                    targetWidth, targetHeight,
+                    imageLimit
+                ).catch(err => {
+                    const errHeader = document.createElement('div');
+                    errHeader.className = 'profile-header profile-header--error';
+                    errHeader.textContent = `${result.username} — Failed: ${err.message}`;
+                    profileContainers[i].appendChild(errHeader);
+                });
+            })
         );
 
         badgeCount.textContent = `(${badges.length})`;
@@ -687,11 +724,21 @@ function escapeCSV(value) {
     return str;
 }
 
-// Export badge list as CSV
+// Get the currently active tab name
+function getActiveTab() {
+    const activeBtn = resultsTabsEl.querySelector('.tab-btn--active');
+    return activeBtn ? activeBtn.dataset.tab : 'by-profile';
+}
+
+// Export badge list as CSV (adapts to active tab)
 function handleExportCSV() {
     if (badges.length === 0) {
         showError('No badges to export');
         return;
+    }
+
+    if (getActiveTab() === 'by-certification') {
+        return exportCertificationCSV();
     }
 
     const headers = ['Profile', 'Name', 'Issuer', 'Issued At', 'Expires At', 'Badge URL', 'Image URL'];
@@ -709,11 +756,38 @@ function handleExportCSV() {
     });
 
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    downloadCSV(csv, 'credly_badges.csv');
+}
+
+// Export By Certification view as CSV (certification name + holder count)
+function exportCertificationCSV() {
+    const groups = new Map();
+    for (const badge of badges) {
+        const key = badge.badge_template?.id || badge.badge_template?.name || badge.name;
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, { badge, holders: new Set() });
+        groups.get(key).holders.add(badge._username);
+    }
+
+    const sorted = Array.from(groups.values()).sort((a, b) => b.holders.size - a.holders.size);
+
+    const headers = ['Certification', 'Holders'];
+    const rows = sorted.map(({ badge, holders }) => {
+        const name = badge.badge_template?.name || badge.name || 'Unknown';
+        return [escapeCSV(name), holders.size];
+    });
+
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    downloadCSV(csv, 'credly_certifications.csv');
+}
+
+// Helper to trigger CSV download
+function downloadCSV(csv, filename) {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'credly_badges.csv';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
 }
