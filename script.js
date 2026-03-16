@@ -3,44 +3,6 @@ let badges = [];
 let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
 
-// Custom profiles from server API
-let cachedCustomProfiles = null;
-
-async function loadCustomProfiles() {
-    try {
-        const res = await fetch('/api/profiles');
-        if (!res.ok) return {};
-        cachedCustomProfiles = await res.json();
-        return cachedCustomProfiles;
-    } catch {
-        return cachedCustomProfiles || {};
-    }
-}
-
-// Merge predefined + custom profiles into one object
-async function getAllProfiles() {
-    const custom = await loadCustomProfiles();
-    const merged = { ...PREDEFINED_PROFILES };
-    for (const [country, urls] of Object.entries(custom)) {
-        if (merged[country]) {
-            const existing = new Set(merged[country].map(normalizeProfileUrl));
-            for (const url of urls) {
-                if (!existing.has(normalizeProfileUrl(url))) {
-                    merged[country].push(url);
-                }
-            }
-        } else {
-            merged[country] = [...urls];
-        }
-    }
-    return merged;
-}
-
-// Check if a country is entirely custom (not predefined)
-function isCustomCountry(country) {
-    return !PREDEFINED_PROFILES[country];
-}
-
 // Predefined profiles grouped by country
 const PREDEFINED_PROFILES = {
     'France': [
@@ -144,24 +106,50 @@ function normalizeProfileUrl(url) {
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
 }
 
+// CORS proxies — skip direct requests (Credly always blocks CORS from browsers)
+const CORS_PROXIES = [
+    (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+];
+
+// Track which proxy index worked last so we try it first next time
+let lastWorkingProxyIndex = 0;
+
+// Fetch a Credly URL through CORS proxies with sticky preference
+async function fetchCredly(credlyUrl) {
+    const order = [
+        lastWorkingProxyIndex,
+        ...Array.from({ length: CORS_PROXIES.length }, (_, i) => i).filter(i => i !== lastWorkingProxyIndex),
+    ];
+
+    let lastError = null;
+    for (const i of order) {
+        try {
+            const response = await fetch(CORS_PROXIES[i](credlyUrl));
+            if (response.ok) {
+                lastWorkingProxyIndex = i;
+                return response;
+            }
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    throw lastError || new Error('All CORS proxies failed');
+}
+
 // Fetch first/last name for a Credly username (best-effort, falls back to username)
 async function fetchUserProfile(username) {
-    const profileUrl = `https://www.credly.com/users/${username}.json`;
-    const corsProxies = ['', 'https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
-    for (const proxy of corsProxies) {
-        try {
-            const url = proxy ? proxy + encodeURIComponent(profileUrl) : profileUrl;
-            const response = await fetch(url);
-            if (!response.ok) continue;
-            const data = await response.json();
-            const user = data.data;
-            if (user) {
-                const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
-                return fullName || username;
-            }
-        } catch {
-            continue;
+    try {
+        const response = await fetchCredly(`https://www.credly.com/users/${username}.json`);
+        const data = await response.json();
+        const user = data.data;
+        if (user) {
+            const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+            return fullName || username;
         }
+    } catch {
+        // fall through
     }
     return username;
 }
@@ -206,52 +194,25 @@ function setLoading(isLoading) {
     }
 }
 
-// Fetch badges from Credly API with sticky proxy (reuses the working proxy across pages)
+// Fetch badges from Credly API
 async function fetchBadges(username) {
     const allBadges = [];
     let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
-    const allProxies = ['', 'https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
-    let stickyProxy = null; // Reuse the proxy that worked on the first page
 
     while (nextUrl) {
-        // Try the known-good proxy first, then fall back to others
-        const proxiesToTry = stickyProxy !== null
-            ? [stickyProxy, ...allProxies.filter(p => p !== stickyProxy)]
-            : allProxies;
+        try {
+            const response = await fetchCredly(nextUrl);
+            const data = await response.json();
+            if (!data.data) break;
 
-        let success = false;
-        let lastError = null;
-
-        for (const proxy of proxiesToTry) {
-            try {
-                const url = proxy ? proxy + encodeURIComponent(nextUrl) : nextUrl;
-                const response = await fetch(url);
-
-                if (!response.ok) {
-                    throw new Error('Failed to fetch badges. User may not exist or profile is private.');
-                }
-
-                const data = await response.json();
-                if (!data.data) break;
-
-                allBadges.push(...data.data);
-                nextUrl = data.metadata?.next_page_url || null;
-                stickyProxy = proxy; // Remember this proxy for subsequent pages
-                success = true;
-                break;
-            } catch (error) {
-                lastError = error;
-                continue;
-            }
-        }
-
-        if (!success) {
+            allBadges.push(...data.data);
+            nextUrl = data.metadata?.next_page_url || null;
+        } catch (error) {
             if (allBadges.length === 0) {
-                throw new Error(`Failed to fetch badges: ${lastError?.message ?? 'Unknown error'}. CORS may be blocking the request.`);
-            } else {
-                console.warn('Could not fetch all pages. Returning partial results.');
-                break;
+                throw new Error(`Failed to fetch badges: ${error.message}`);
             }
+            console.warn('Could not fetch all pages. Returning partial results.');
+            break;
         }
     }
 
@@ -291,31 +252,16 @@ function loadImageDirect(imageUrl) {
 
 // Load image via CORS proxy
 async function loadImageViaProxy(imageUrl) {
-    const proxies = [
-        'https://corsproxy.io/?',
-        'https://api.allorigins.win/raw?url=',
-    ];
+    const response = await fetchCredly(imageUrl);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
 
-    for (const proxy of proxies) {
-        try {
-            const response = await fetch(proxy + encodeURIComponent(imageUrl));
-            if (!response.ok) continue;
-
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
-
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => { URL.revokeObjectURL(objectUrl); resolve(img); };
-                img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Proxy load failed')); };
-                img.src = objectUrl;
-            });
-        } catch {
-            continue;
-        }
-    }
-
-    throw new Error('All proxy attempts failed');
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(objectUrl); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Proxy load failed')); };
+        img.src = objectUrl;
+    });
 }
 
 // Process image on canvas
@@ -727,17 +673,16 @@ function handleExportCSV() {
 }
 
 // Update the textarea to reflect the current checkbox selection
-async function updateTextareaFromCheckboxes() {
-    const allProfiles = await getAllProfiles();
+function updateTextareaFromCheckboxes() {
     const allKnownUsernames = new Set(
-        Object.values(allProfiles).flat().map(normalizeProfileUrl)
+        Object.values(PREDEFINED_PROFILES).flat().map(normalizeProfileUrl)
     );
 
     const currentLines = profileUrlInput.value.split('\n').map(l => l.trim()).filter(Boolean);
     const manualLines = currentLines.filter(l => !allKnownUsernames.has(normalizeProfileUrl(l)));
 
     const countryLines = [];
-    for (const [country, urls] of Object.entries(allProfiles)) {
+    for (const [country, urls] of Object.entries(PREDEFINED_PROFILES)) {
         const checkbox = document.querySelector(`.country-pill[data-country="${CSS.escape(country)}"] input[type="checkbox"]`);
         if (checkbox?.checked) countryLines.push(...urls);
     }
@@ -745,8 +690,8 @@ async function updateTextareaFromCheckboxes() {
     profileUrlInput.value = [...manualLines, ...countryLines].join('\n');
 }
 
-// Render country pill checkboxes from merged profiles
-async function initQuickSelect() {
+// Render country pill checkboxes
+function initQuickSelect() {
     const container = document.getElementById('quick-select');
     if (!container) return;
     container.innerHTML = '';
@@ -760,10 +705,9 @@ async function initQuickSelect() {
     pills.className = 'country-pills';
     container.appendChild(pills);
 
-    const allProfiles = await getAllProfiles();
-    for (const [country, urls] of Object.entries(allProfiles)) {
+    for (const [country, urls] of Object.entries(PREDEFINED_PROFILES)) {
         const label = document.createElement('label');
-        label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
+        label.className = 'country-pill';
         label.dataset.country = country;
         label.innerHTML = `
             <input type="checkbox">
@@ -773,209 +717,6 @@ async function initQuickSelect() {
         label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
         pills.appendChild(label);
     }
-
-    // "Add Profile" button
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'add-profile-btn';
-    addBtn.innerHTML = '<span class="plus-icon">+</span> Add Profile';
-    addBtn.addEventListener('click', openAddProfileModal);
-    pills.appendChild(addBtn);
-
-    // Render custom profiles list (removable)
-    const custom = cachedCustomProfiles || {};
-    const customEntries = Object.entries(custom).flatMap(([country, urls]) =>
-        urls.map(url => ({ country, url }))
-    );
-    if (customEntries.length > 0) {
-        const listContainer = document.createElement('div');
-        listContainer.className = 'custom-profiles-list';
-
-        const listTitle = document.createElement('p');
-        listTitle.className = 'quick-select-title';
-        listTitle.textContent = 'Your added profiles';
-        listContainer.appendChild(listTitle);
-
-        const list = document.createElement('div');
-        list.className = 'custom-profiles-tags';
-        for (const { country, url } of customEntries) {
-            const username = url.match(/\/users\/([^\/\s#?]+)/i)?.[1] || url;
-            const tag = document.createElement('span');
-            tag.className = 'custom-profile-tag';
-            tag.innerHTML = `
-                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
-                <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
-            `;
-            tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
-                removeCustomProfile(country, url);
-            });
-            list.appendChild(tag);
-        }
-        listContainer.appendChild(list);
-        container.appendChild(listContainer);
-    }
-}
-
-// Remove a custom profile from a country
-async function removeCustomProfile(country, url) {
-    const password = sessionPassword || prompt('Enter the password to remove a profile:');
-    if (!password) return;
-
-    try {
-        const res = await fetch('/api/profiles', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password, country, url }),
-        });
-        if (res.status === 401) {
-            sessionPassword = null;
-            alert('Incorrect password.');
-            return;
-        }
-        if (!res.ok) { alert('Failed to remove profile.'); return; }
-        sessionPassword = password;
-    } catch {
-        alert('Network error.');
-        return;
-    }
-
-    await initQuickSelect();
-    await updateTextareaFromCheckboxes();
-}
-
-// Password session cache (only lives in memory, never persisted)
-let sessionPassword = null;
-
-// Modal logic
-async function openAddProfileModal() {
-    const modal = document.getElementById('add-profile-modal');
-    const countrySelect = document.getElementById('modal-country');
-    const newCountryGroup = document.getElementById('new-country-group');
-    const newCountryInput = document.getElementById('modal-new-country');
-    const modalError = document.getElementById('modal-error');
-    const profileUrlModalInput = document.getElementById('modal-profile-url');
-
-    // Reset form
-    profileUrlModalInput.value = '';
-    newCountryInput.value = '';
-    modalError.style.display = 'none';
-    newCountryGroup.style.display = 'none';
-
-    // Populate country dropdown
-    const allProfiles = await getAllProfiles();
-    countrySelect.innerHTML = '<option value="" disabled selected>Select a country...</option>';
-    for (const country of Object.keys(allProfiles).sort()) {
-        const opt = document.createElement('option');
-        opt.value = country;
-        opt.textContent = country;
-        countrySelect.appendChild(opt);
-    }
-    const newOpt = document.createElement('option');
-    newOpt.value = '__new__';
-    newOpt.textContent = '+ Add a new country...';
-    countrySelect.appendChild(newOpt);
-
-    modal.showModal();
-}
-
-function initModal() {
-    const modal = document.getElementById('add-profile-modal');
-    const form = document.getElementById('add-profile-form');
-    const countrySelect = document.getElementById('modal-country');
-    const newCountryGroup = document.getElementById('new-country-group');
-    const newCountryInput = document.getElementById('modal-new-country');
-    const cancelBtn = document.getElementById('modal-cancel-btn');
-    const modalError = document.getElementById('modal-error');
-
-    // Show/hide new country input
-    countrySelect.addEventListener('change', () => {
-        const isNew = countrySelect.value === '__new__';
-        newCountryGroup.style.display = isNew ? 'block' : 'none';
-        newCountryInput.required = isNew;
-    });
-
-    // Cancel
-    cancelBtn.addEventListener('click', () => modal.close());
-
-    // Close on backdrop click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.close();
-    });
-
-    // Submit
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const url = document.getElementById('modal-profile-url').value.trim();
-        const countryValue = countrySelect.value;
-        const newCountry = newCountryInput.value.trim();
-
-        // Validate URL
-        if (!url.match(/credly\.com\/users\/[^\/\s]+/i)) {
-            modalError.textContent = 'Please enter a valid Credly profile URL (e.g. https://www.credly.com/users/username)';
-            modalError.style.display = 'block';
-            return;
-        }
-
-        // Determine country
-        let country;
-        if (countryValue === '__new__') {
-            if (!newCountry) {
-                modalError.textContent = 'Please enter a country name.';
-                modalError.style.display = 'block';
-                return;
-            }
-            country = newCountry;
-        } else {
-            country = countryValue;
-        }
-
-        // Check for duplicate against full set (predefined + custom)
-        const allProfiles = await getAllProfiles();
-        const norm = normalizeProfileUrl(url);
-        for (const [c, urls] of Object.entries(allProfiles)) {
-            if (urls.some(u => normalizeProfileUrl(u) === norm)) {
-                modalError.textContent = `This profile already exists under "${c}".`;
-                modalError.style.display = 'block';
-                return;
-            }
-        }
-
-        // Ask for password if not yet cached
-        const password = sessionPassword || prompt('Enter the password to add a profile:');
-        if (!password) return;
-
-        const fullUrl = url.match(/^https?:\/\//) ? url : `https://www.credly.com/users/${url}`;
-
-        try {
-            const res = await fetch('/api/profiles', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password, country, url: fullUrl }),
-            });
-
-            if (res.status === 401) {
-                sessionPassword = null;
-                modalError.textContent = 'Incorrect password.';
-                modalError.style.display = 'block';
-                return;
-            }
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                modalError.textContent = data.error || 'Failed to add profile.';
-                modalError.style.display = 'block';
-                return;
-            }
-
-            sessionPassword = password;
-        } catch {
-            modalError.textContent = 'Network error. Is the server running?';
-            modalError.style.display = 'block';
-            return;
-        }
-
-        modal.close();
-        await initQuickSelect();
-    });
 }
 
 // Ctrl+Enter (or Cmd+Enter on Mac) triggers fetch from the textarea
@@ -985,6 +726,5 @@ profileUrlInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialise quick-select checkboxes and modal on page load
+// Initialise quick-select checkboxes on page load
 initQuickSelect();
-initModal();

@@ -1,12 +1,5 @@
 {
   "name": "credly-scraper",
   "version": "1.0.0",
-  "description": "Credly badge scraper with profile management",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.21.0"
-  }
+  "description": "Credly badge scraper — static site for GitHub Pages"
 }
