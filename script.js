@@ -323,7 +323,7 @@ function showTab(tabName) {
         btn.classList.toggle('tab-btn--active', btn.dataset.tab === tabName);
     });
     commonGrid.style.display = tabName === 'common' ? 'grid' : 'none';
-    certificationGrid.style.display = tabName === 'by-certification' ? 'grid' : 'none';
+    certificationGrid.style.display = tabName === 'by-certification' ? 'block' : 'none';
     badgesGrid.style.display = tabName === 'by-profile' ? 'grid' : 'none';
 }
 
@@ -393,7 +393,7 @@ function createCommonCard(badge, globalIndex, holders) {
     return card;
 }
 
-// Build and render the "By Certification" view (all certs ranked by holder count descending)
+// Build and render the "By Certification" view as a simple table
 function renderByCertification() {
     certificationGrid.innerHTML = '';
 
@@ -402,7 +402,7 @@ function renderByCertification() {
         const badge = badges[i];
         const key = badge.badge_template?.id || badge.badge_template?.name || badge.name;
         if (!key) continue;
-        if (!groups.has(key)) groups.set(key, { badge, globalIndex: i, holders: new Set() });
+        if (!groups.has(key)) groups.set(key, { badge, holders: new Set() });
         groups.get(key).holders.add(badge._username);
     }
 
@@ -410,16 +410,24 @@ function renderByCertification() {
         .sort((a, b) => b.holders.size - a.holders.size);
 
     if (sorted.length === 0) {
-        const msg = document.createElement('p');
-        msg.className = 'no-common-msg';
-        msg.textContent = 'No certifications found.';
-        certificationGrid.appendChild(msg);
+        certificationGrid.innerHTML = '<p class="no-common-msg">No certifications found.</p>';
         return;
     }
 
-    for (const { badge, globalIndex, holders } of sorted) {
-        certificationGrid.appendChild(createCommonCard(badge, globalIndex, holders));
-    }
+    const table = document.createElement('table');
+    table.className = 'certification-table';
+    table.innerHTML = `
+        <thead>
+            <tr><th>Certification</th><th>Holders</th></tr>
+        </thead>
+        <tbody>
+            ${sorted.map(({ badge, holders }) => {
+                const name = badge.badge_template?.name || badge.name || 'Unknown';
+                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
+            }).join('')}
+        </tbody>
+    `;
+    certificationGrid.appendChild(table);
 }
 
 // Sanitize filename
