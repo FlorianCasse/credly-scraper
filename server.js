@@ -2,13 +2,28 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD || null;
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+if (!PASSWORD) {
+    console.warn('WARNING: APP_PASSWORD is not set. Profile management endpoints (POST/DELETE /api/profiles) are disabled.');
+}
+
+app.use(helmet());
+app.use(express.json({ limit: '10kb' }));
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 15, // limit each IP to 15 requests per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+});
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
@@ -298,7 +313,11 @@ app.get('/api/profiles', (req, res) => {
 });
 
 // Add a profile
-app.post('/api/profiles', (req, res) => {
+app.post('/api/profiles', authLimiter, (req, res) => {
+    if (!PASSWORD) {
+        return res.status(503).json({ error: 'Profile management is disabled. APP_PASSWORD is not configured.' });
+    }
+
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
@@ -332,7 +351,11 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // Remove a profile
-app.delete('/api/profiles', (req, res) => {
+app.delete('/api/profiles', authLimiter, (req, res) => {
+    if (!PASSWORD) {
+        return res.status(503).json({ error: 'Profile management is disabled. APP_PASSWORD is not configured.' });
+    }
+
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
