@@ -1,100 +1,93 @@
 # Security Review: credly-scraper
 
-**Date:** 2026-04-01
-**Reviewed by:** Claude (Automated Security Review)
-**Language/Framework:** Node.js / Express
-**Dependency Manager:** npm (package.json)
-
 ## Summary
 - Total findings: 12
 - Critical: 2 | High: 3 | Medium: 4 | Low: 3
-- PRs opened: 1 ([PR #3](https://github.com/FlorianCasse/credly-scraper/pull/3))
-- Issues opened: 0 (Issues are disabled on this repository)
-
-> **Note:** GitHub Issues are disabled on this repository. All findings that would have been filed as issues are documented in this report instead. Non-PR findings should be tracked separately.
+- PRs opened: 0 (pending GitHub API access)
+- Issues opened: 0 (pending GitHub API access)
 
 ## Findings
 
-### [CRITICAL] Hardcoded Default Password
+### [CRITICAL] Hardcoded Default Password in Source Code
 - **File:** `server.js` (line 8)
-- **Description:** A hardcoded default password `certificationitq1!` is embedded as a fallback when `APP_PASSWORD` env var is not set. This password is visible in source code and Git history, allowing unauthorized modification of profiles.
-- **Remediation:** Remove the hardcoded fallback. Require `APP_PASSWORD` to be explicitly set; disable profile endpoints if unset.
+- **Description:** A hardcoded fallback password (`certificationitq1!`) is used when the `APP_PASSWORD` environment variable is not set. This password is visible in source code and git history, and is deployed to GitHub Pages.
+- **Remediation:** Remove the fallback password; require `APP_PASSWORD` to be set via environment variable. Exit with error if missing.
 - **PR-ready:** yes
-- **Action taken:** PR #3 https://github.com/FlorianCasse/credly-scraper/pull/3
+- **Action taken:** Branch `security/remove-hardcoded-password` pushed. PR pending.
 
-### [CRITICAL] XSS Vulnerability via Unsanitized innerHTML
-- **File:** `script.js` (lines 319-328, 406-413, 453-461, 923-927)
-- **Description:** User-controlled data (country names, usernames from custom profiles) is inserted directly into `innerHTML` without sanitization. An attacker could inject malicious HTML/JavaScript via crafted profile data.
-- **Remediation:** Use `textContent` instead of `innerHTML` for plain text, or create an `escapeHtml()` sanitization function for all user-derived content.
-- **PR-ready:** no (requires significant refactoring of DOM construction patterns)
-- **Action taken:** Documented in this report (Issues disabled on repo)
+### [CRITICAL] XSS via Unsanitized innerHTML
+- **File:** `script.js` (lines 319-331, 406-414, 453-463, 923-927)
+- **Description:** External data from the Credly API (badge names, issuer names, image URLs) and user-supplied data (country names) are inserted into the DOM via `innerHTML` without sanitization. If the Credly API is compromised or returns malicious data, arbitrary JavaScript can be executed in users' browsers.
+- **Remediation:** Add an `escapeHtml()` helper function and sanitize all external data before DOM insertion.
+- **PR-ready:** yes
+- **Action taken:** Branch `security/add-headers-and-fix-xss` pushed. PR pending.
 
 ### [HIGH] Missing Security Headers
 - **File:** `server.js` (lines 1-12)
-- **Description:** No security headers configured (CSP, X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy, Permissions-Policy).
-- **Remediation:** Add `helmet` middleware: `app.use(helmet())`.
+- **Description:** No security headers configured. Missing CSP, X-Content-Type-Options, X-Frame-Options, HSTS, and Referrer-Policy. Application is vulnerable to XSS, clickjacking, and MIME sniffing attacks.
+- **Remediation:** Add security header middleware (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy).
 - **PR-ready:** yes
-- **Action taken:** PR #3 https://github.com/FlorianCasse/credly-scraper/pull/3
+- **Action taken:** Branch `security/add-headers-and-fix-xss` pushed. PR pending.
 
-### [HIGH] No Rate Limiting on Password-Protected Endpoints
+### [HIGH] No Rate Limiting on Authentication Endpoints
 - **File:** `server.js` (lines 301-356)
-- **Description:** POST and DELETE `/api/profiles` endpoints lack rate limiting, enabling brute-force password attacks.
-- **Remediation:** Add `express-rate-limit` middleware to authentication endpoints.
-- **PR-ready:** yes
-- **Action taken:** PR #3 https://github.com/FlorianCasse/credly-scraper/pull/3
-
-### [HIGH] Path Traversal Risk in Shell Script
-- **File:** `credly_badge_downloader.sh` (lines 241, 268-323)
-- **Description:** Username extracted from URLs is used in directory creation without sanitizing path traversal characters (`../`). A crafted username could create directories outside the intended location.
-- **Remediation:** Validate username with strict regex: `[[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]`
-- **PR-ready:** no (shell script needs broader security review)
-- **Action taken:** Documented in this report (Issues disabled on repo)
-
-### [HIGH] Data File Stored with Default Permissions
-- **File:** `server.js` (lines 360-361)
-- **Description:** `custom-profiles.json` is created without explicit file permissions. Default umask may allow other users on the system to read profile data.
-- **Remediation:** Set `mode: 0o700` on directory and `0o600` on data file.
-- **PR-ready:** no (requires testing on deployment environment)
-- **Action taken:** Documented in this report (Issues disabled on repo)
-
-### [MEDIUM] Session Password Cached Indefinitely
-- **File:** `script.js` (line 1002)
-- **Description:** Password cached in global `sessionPassword` variable, never cleared. Persists for entire browser session.
-- **Remediation:** Add timeout to clear cached password; clear on `visibilitychange` event.
+- **Description:** Password-protected POST and DELETE endpoints (`/api/profiles`) lack rate limiting. An attacker can make unlimited password guesses without throttling, enabling brute-force attacks.
+- **Remediation:** Implement express-rate-limit with strict limits on authentication endpoints.
 - **PR-ready:** no
-- **Action taken:** Documented in this report (Issues disabled on repo)
+- **Action taken:** Issue pending.
+
+### [HIGH] Path Traversal in Shell Script
+- **File:** `credly_badge_downloader.sh` (lines 66-81)
+- **Description:** Username extracted from URL with regex `[^/]+` accepts path traversal characters (`../`). An attacker could create directories outside the intended location using a crafted URL like `https://www.credly.com/users/../../../etc/passwd`.
+- **Remediation:** Add strict username validation: only allow `[a-zA-Z0-9._-]+`.
+- **PR-ready:** yes
+- **Action taken:** Branch `security/fix-shell-path-traversal` pushed. PR pending.
 
 ### [MEDIUM] No HTTPS Enforcement
-- **File:** `server.js`
-- **Description:** No HTTPS redirect or HSTS headers. Passwords transmitted in plain text without infrastructure-level HTTPS.
-- **Remediation:** Add HTTPS redirect middleware for production and HSTS header.
+- **File:** `server.js` (lines 417-420)
+- **Description:** Server listens on HTTP only. Passwords are transmitted in plaintext unless infrastructure provides TLS termination.
+- **Remediation:** Add HTTPS redirect middleware or document TLS proxy requirement.
 - **PR-ready:** no
-- **Action taken:** Documented in this report (Issues disabled on repo)
+- **Action taken:** Issue pending.
 
-### [MEDIUM] Missing Input Validation on Country Field
-- **File:** `server.js` (lines 307-309)
-- **Description:** No maximum length or character validation on country field. Attacker could submit very long strings or XSS payloads.
-- **Remediation:** Add length limit (100 chars) and character whitelist validation.
-- **PR-ready:** no
-- **Action taken:** Documented in this report (Issues disabled on repo)
-
-### [MEDIUM] No Request Body Size Limits
+### [MEDIUM] Missing Request Body Size Limits
 - **File:** `server.js` (line 11)
-- **Description:** `express.json()` uses default 100kb limit. Should be explicitly restricted.
-- **Remediation:** Set `express.json({ limit: '10kb' })`.
-- **PR-ready:** yes
-- **Action taken:** PR #3 https://github.com/FlorianCasse/credly-scraper/pull/3
-
-### [LOW] JSZip CDN Missing SRI Hash
-- **File:** `index.html` (line 127)
-- **Description:** JSZip loaded from CDN without Subresource Integrity check. Supply chain risk if CDN is compromised.
-- **Remediation:** Add `integrity` and `crossorigin="anonymous"` attributes.
-- **PR-ready:** yes
-- **Action taken:** PR #3 https://github.com/FlorianCasse/credly-scraper/pull/3
-
-### [LOW] Error Messages Expose Technical Details
-- **File:** `script.js` (lines 687-691)
-- **Description:** Server error messages displayed directly to users, potentially revealing API internal information.
-- **Remediation:** Show generic error messages to users; log details server-side.
+- **Description:** `express.json()` used without explicit size limit. Default 100KB may be too generous for the endpoints in use. No explicit limit set.
+- **Remediation:** Set explicit body size limit: `express.json({ limit: '10kb' })`.
 - **PR-ready:** no
-- **Action taken:** Documented in this report (Issues disabled on repo)
+- **Action taken:** Issue pending.
+
+### [MEDIUM] Data File Permissions Not Explicitly Set
+- **File:** `server.js` (lines 360-361)
+- **Description:** `data/custom-profiles.json` created via `fs.mkdirSync` and `fs.writeFileSync` without explicit file permissions. Default umask may allow other users to read/modify profile data.
+- **Remediation:** Use `mode: 0o700` for directory and `mode: 0o600` for file creation.
+- **PR-ready:** no
+- **Action taken:** Issue pending.
+
+### [MEDIUM] No CSRF Protection
+- **File:** `server.js` (POST and DELETE `/api/profiles`)
+- **Description:** No CSRF token validation on state-changing endpoints. If a victim visits a malicious site while having access to the credly-scraper, an attacker can add/remove profiles.
+- **Remediation:** Implement CSRF token validation for all state-changing endpoints.
+- **PR-ready:** no
+- **Action taken:** Issue pending.
+
+### [LOW] Missing Subresource Integrity on CDN Script
+- **File:** `index.html` (line 127)
+- **Description:** JSZip loaded from cdnjs.cloudflare.com without SRI hash. If the CDN is compromised, malicious code could be injected.
+- **Remediation:** Add `integrity` and `crossorigin` attributes to the script tag.
+- **PR-ready:** yes
+- **Action taken:** Branch `security/add-headers-and-fix-xss` pushed. PR pending.
+
+### [LOW] Session Password Cached Indefinitely
+- **File:** `script.js` (lines 991, 1002, 1099, 1124)
+- **Description:** Password cached in a global JavaScript variable for the entire browser session with no timeout or clearing mechanism.
+- **Remediation:** Add a timeout (e.g., 5 minutes) to clear the cached password.
+- **PR-ready:** no
+- **Action taken:** Issue pending.
+
+### [LOW] Error Message Information Disclosure
+- **File:** `script.js` (lines 633, 657, 714)
+- **Description:** Server error messages displayed directly to users, potentially revealing API implementation details.
+- **Remediation:** Display generic error messages to users; log details to console for debugging.
+- **PR-ready:** no
+- **Action taken:** Issue pending.
