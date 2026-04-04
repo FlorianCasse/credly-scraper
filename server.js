@@ -92,6 +92,12 @@ app.get('/api/credly', (req, res) => {
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
     }
+    if (parsed.protocol !== 'https:') {
+        return res.status(400).json({ error: 'Only HTTPS URLs are allowed' });
+    }
+    if (parsed.username || parsed.password) {
+        return res.status(400).json({ error: 'URLs with credentials are not allowed' });
+    }
 
     const cacheKey = credlyUrl;
     const cached = getCached(cacheKey);
