@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD;
 if (!PASSWORD) {
-    console.error('FATAL: APP_PASSWORD environment variable is required. Exiting.');
+    console.error('FATAL: APP_PASSWORD environment variable is required');
     process.exit(1);
 }
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
