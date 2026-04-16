@@ -5,7 +5,13 @@ const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+
+if (!process.env.APP_PASSWORD) {
+    console.error('FATAL: APP_PASSWORD environment variable must be set.');
+    process.exit(1);
+}
+const PASSWORD = process.env.APP_PASSWORD;
+
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
 app.use(express.json());
