@@ -1,56 +1,58 @@
 # Security Review: credly-scraper
 
-**Date:** 2026-04-16
+**Date:** 2026-04-17 (re-run)
 **Reviewer:** Claude (automated security review)
 **Language/Framework:** Node.js / Express
 **Dependency Manager:** npm (package.json)
 
+## Status: Findings Persist on `main` — Multiple PRs Pending Merge
+
+This re-run confirms that all previously identified findings remain present on `main`. Twelve PRs (#1, #3, #4, #5, #7, #8, #9, #10, #11, #12) already address these findings but **none have been merged**. No new PRs were opened in this run to avoid further duplication.
+
 ## Summary
-- Total findings: 5
+- Total findings: 5 (unchanged)
 - Critical: 1 | High: 1 | Medium: 2 | Low: 1
-- PRs opened: 1 (https://github.com/FlorianCasse/credly-scraper/pull/12)
-- Issues opened: 0 (Issues are disabled in this repository; findings documented in this report and in PR #12)
+- PRs opened this run: 0 (existing PRs already cover all findings)
+- Issues opened this run: 0 (Issues are disabled in this repository)
 
 ## Findings
 
 ### [CRITICAL] Hardcoded password fallback in server.js
-- **File:** `server.js` (line 10)
-- **Description:** The `PASSWORD` constant uses a hardcoded fallback value `certificationitq1!` when the `APP_PASSWORD` environment variable is not set. Since this is a public repository, anyone can read this password and use it to add/remove Credly profiles via the API.
-- **Remediation:** Remove the hardcoded fallback. Require `APP_PASSWORD` to be set as an environment variable; exit the process if it is missing.
+- **File:** `server.js` (line 8)
+- **Status on main:** STILL PRESENT — `const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';`
+- **Description:** The `PASSWORD` constant uses a hardcoded fallback `certificationitq1!` when `APP_PASSWORD` is unset. Public source = anyone can authenticate.
+- **Remediation:** Remove the fallback; require the env var; exit if missing.
 - **PR-ready:** yes
-- **Action taken:** PR #12 https://github.com/FlorianCasse/credly-scraper/pull/12
+- **Existing PRs:** #1, #3, #4, #7, #11, #12 — pick one and merge
 
 ### [HIGH] XSS risk via innerHTML with untrusted external data
-- **File:** `script.js` (multiple locations: `createBadgeCard()`, `createCommonCard()`, `renderByCertification()`)
-- **Description:** Multiple functions use `.innerHTML` to render badge data received from the Credly API without sanitization. Badge names, issuer names, and descriptions containing HTML/script tags would be executed in the user's browser.
-- **Remediation:** Replace `.innerHTML` assignments with safe DOM manipulation (`textContent`, `createElement()`) or use a sanitization library like DOMPurify.
-- **PR-ready:** no (extensive refactor across many functions)
-- **Action taken:** Documented in this report (issues disabled in repo)
+- **File:** `script.js` (`createBadgeCard()`, `createCommonCard()`, `renderByCertification()`)
+- **Description:** Multiple `innerHTML` assignments interpolate badge data from the Credly API without sanitization.
+- **Remediation:** Replace with `textContent` / `createElement()`, or apply DOMPurify.
+- **PR-ready:** yes
+- **Existing PRs:** #5, #9 — pick one and merge
 
 ### [MEDIUM] Missing security headers on Express server
 - **File:** `server.js`
-- **Description:** The Express server does not use `helmet` middleware or set any security headers (`X-Content-Type-Options`, `X-Frame-Options`, `CSP`, `HSTS`, `Referrer-Policy`).
-- **Remediation:** Add `helmet` as a dependency and apply it as middleware.
-- **PR-ready:** no (requires new dependency)
-- **Action taken:** Documented in this report (issues disabled in repo)
+- **Description:** No `helmet` middleware; no CSP, HSTS, X-Frame-Options, etc.
+- **Remediation:** Add `helmet` and apply as middleware.
+- **PR-ready:** yes
+- **Existing PRs:** #3, #5, #8 — pick one and merge
 
 ### [MEDIUM] No rate limiting on API endpoints
 - **File:** `server.js`
-- **Description:** No rate limiting is configured. Password-protected endpoints are vulnerable to brute-force attacks. The proxy and batch endpoints can be abused for DoS.
-- **Remediation:** Add `express-rate-limit` and apply strict limits to auth endpoints and general limits to all others.
-- **PR-ready:** no (requires new dependency and architectural decisions)
-- **Action taken:** Documented in this report (issues disabled in repo)
+- **Description:** Password endpoints brute-forceable; proxy endpoints abusable for DoS.
+- **Remediation:** Add `express-rate-limit`.
+- **PR-ready:** yes
+- **Existing PRs:** #3, #8 — partial coverage
 
 ### [LOW] No HTTPS enforcement
 - **File:** `server.js`
-- **Description:** The server runs on plain HTTP. The password transmitted to profile management endpoints is sent in cleartext.
-- **Remediation:** Deploy behind a TLS-terminating reverse proxy or add native HTTPS support.
-- **PR-ready:** no (deployment infrastructure concern)
-- **Action taken:** Documented in this report (issues disabled in repo)
+- **Description:** Plain HTTP exposes the password in transit.
+- **Remediation:** Deploy behind a TLS-terminating reverse proxy.
+- **PR-ready:** no (deployment concern)
+- **Action:** Documented; no PR opened
 
-## Areas Checked (No Issues Found)
-- **Hardcoded secrets (other than password):** No API keys or tokens found in source
-- **Dependency vulnerabilities:** `express ^4.21.0` is current; no known high-severity CVEs
-- **SSRF in proxy:** The `/api/credly` proxy validates hostnames against an allowlist — adequate protection
-- **File system access:** File operations are limited to the `data/` directory with controlled paths
-- **Injection risks:** No SQL or command injection vectors found
+## Recommendation
+
+The priority is to **review and merge one of the existing PRs**, not to open more. The accumulation of 12 unmerged security PRs represents technical debt and review fatigue. Suggest closing duplicate PRs and merging PR #12 (most recent comprehensive fix for the CRITICAL finding) plus PR #5 or #9 for the XSS fix.
