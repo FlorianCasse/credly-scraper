@@ -2,13 +2,44 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const HOST = process.env.HOST || '127.0.0.1';
+// SECURITY (CRITICAL): no hardcoded fallback. APP_PASSWORD must be provided.
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD || typeof PASSWORD !== 'string' || PASSWORD.length < 8) {
+    console.error('FATAL: APP_PASSWORD environment variable is required and must be at least 8 characters.');
+    process.exit(1);
+}
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+// SECURITY (LOW): explicit body size cap to avoid memory exhaustion on /api/*.
+app.use(express.json({ limit: '100kb' }));
+
+// SECURITY (MEDIUM): baseline security headers applied to every response.
+app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    // Allow JSZip CDN used by index.html; block inline eval; restrict connect to same-origin.
+    res.set(
+        'Content-Security-Policy',
+        "default-src 'self'; " +
+        "img-src 'self' data: blob: https://images.credly.com https://www.credly.com; " +
+        "script-src 'self' https://cdnjs.cloudflare.com; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "connect-src 'self'; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "object-src 'none'"
+    );
+    next();
+});
+
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
@@ -34,6 +65,57 @@ function normalizeUrl(url) {
     const match = url.trim().match(/credly\.com\/users\/([^\/\s#?]+)/i);
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
 }
+
+// SECURITY (HIGH): timing-safe password comparison.
+function passwordMatches(candidate) {
+    if (typeof candidate !== 'string') return false;
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(PASSWORD);
+    if (a.length !== b.length) return false;
+    try {
+        return crypto.timingSafeEqual(a, b);
+    } catch {
+        return false;
+    }
+}
+
+// SECURITY (MEDIUM): lightweight in-memory rate limiter.
+function createRateLimiter({ windowMs, max, message }) {
+    const hits = new Map();
+    setInterval(() => {
+        const cutoff = Date.now() - windowMs;
+        for (const [key, entry] of hits) {
+            if (entry.start < cutoff) hits.delete(key);
+        }
+    }, windowMs).unref?.();
+
+    return (req, res, next) => {
+        const key = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+        const now = Date.now();
+        const entry = hits.get(key);
+        if (!entry || now - entry.start > windowMs) {
+            hits.set(key, { start: now, count: 1 });
+            return next();
+        }
+        entry.count++;
+        if (entry.count > max) {
+            return res.status(429).json({ error: message || 'Too many requests' });
+        }
+        next();
+    };
+}
+
+const authLimiter = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: 'Too many authentication attempts, please try again later.',
+});
+
+const scrapeLimiter = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 60,
+    message: 'Too many scrape requests, please slow down.',
+});
 
 // --- In-Memory Cache ---
 const cache = new Map();
@@ -83,12 +165,21 @@ function setCache(key, buffer, contentType) {
 
 const ALLOWED_CREDLY_HOSTS = ['www.credly.com', 'credly.com', 'images.credly.com'];
 
-app.get('/api/credly', (req, res) => {
+app.get('/api/credly', scrapeLimiter, (req, res) => {
     const credlyUrl = req.query.url;
-    if (!credlyUrl) return res.status(400).json({ error: 'Missing url parameter' });
+    if (!credlyUrl || typeof credlyUrl !== 'string' || credlyUrl.length > 2048) {
+        return res.status(400).json({ error: 'Missing or invalid url parameter' });
+    }
 
     let parsed;
     try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    // SECURITY (HIGH): enforce https and reject URLs embedding credentials to mitigate SSRF.
+    if (parsed.protocol !== 'https:') {
+        return res.status(400).json({ error: 'Only https URLs are allowed' });
+    }
+    if (parsed.username || parsed.password) {
+        return res.status(400).json({ error: 'URLs with embedded credentials are not allowed' });
+    }
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
     }
@@ -191,9 +282,16 @@ function fetchUrl(url) {
     });
 }
 
+// SECURITY (MEDIUM): strict username validation to prevent injection into upstream URL.
+const USERNAME_RE = /^[a-zA-Z0-9._-]{1,100}$/;
+function isValidUsername(u) {
+    return typeof u === 'string' && USERNAME_RE.test(u);
+}
+
 async function fetchAllBadges(username) {
+    if (!isValidUsername(username)) throw new Error('Invalid username');
     const allBadges = [];
-    let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
+    let nextUrl = `https://www.credly.com/users/${encodeURIComponent(username)}/badges.json`;
     while (nextUrl) {
         const data = await fetchUrl(nextUrl);
         if (!data.data) break;
@@ -204,8 +302,9 @@ async function fetchAllBadges(username) {
 }
 
 async function fetchDisplayName(username) {
+    if (!isValidUsername(username)) return username;
     try {
-        const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
+        const data = await fetchUrl(`https://www.credly.com/users/${encodeURIComponent(username)}.json`);
         const user = data.data;
         if (user) {
             const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
@@ -215,13 +314,16 @@ async function fetchDisplayName(username) {
     return username;
 }
 
-app.post('/api/batch-badges', async (req, res) => {
+app.post('/api/batch-badges', scrapeLimiter, async (req, res) => {
     const { usernames } = req.body;
     if (!Array.isArray(usernames) || usernames.length === 0) {
         return res.status(400).json({ error: 'usernames array is required' });
     }
     if (usernames.length > 100) {
         return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    }
+    if (!usernames.every(isValidUsername)) {
+        return res.status(400).json({ error: 'One or more usernames are invalid' });
     }
 
     const limit = createConcurrencyLimiter(10);
@@ -237,7 +339,7 @@ app.post('/api/batch-badges', async (req, res) => {
 
     const response = results.map((r, i) => {
         if (r.status === 'fulfilled') return r.value;
-        return { username: usernames[i], displayName: usernames[i], badges: [], error: r.reason?.message };
+        return { username: usernames[i], displayName: usernames[i], badges: [], error: 'upstream error' };
     });
 
     res.json(response);
@@ -245,13 +347,18 @@ app.post('/api/batch-badges', async (req, res) => {
 
 // --- SSE Streaming Batch Endpoint ---
 
-app.get('/api/batch-badges-stream', (req, res) => {
+app.get('/api/batch-badges-stream', scrapeLimiter, (req, res) => {
     const raw = req.query.usernames;
-    if (!raw) return res.status(400).json({ error: 'usernames query parameter is required' });
+    if (!raw || typeof raw !== 'string' || raw.length > 10_000) {
+        return res.status(400).json({ error: 'usernames query parameter is required' });
+    }
 
     const usernames = raw.split(',').map(u => u.trim()).filter(Boolean);
     if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
     if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    if (!usernames.every(isValidUsername)) {
+        return res.status(400).json({ error: 'One or more usernames are invalid' });
+    }
 
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -276,9 +383,10 @@ app.get('/api/batch-badges-stream', (req, res) => {
                 if (!closed) {
                     res.write(`data: ${JSON.stringify({ username, displayName, badges })}\n\n`);
                 }
-            } catch (err) {
+            } catch {
                 if (!closed) {
-                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: err.message })}\n\n`);
+                    // Avoid leaking internal error details to clients.
+                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: 'upstream error' })}\n\n`);
                 }
             }
             completed++;
@@ -298,16 +406,20 @@ app.get('/api/profiles', (req, res) => {
 });
 
 // Add a profile
-app.post('/api/profiles', (req, res) => {
+app.post('/api/profiles', authLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
     }
-    if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
+    if (country.length > 100) {
+        return res.status(400).json({ error: 'Country is too long.' });
+    }
+    if (!url || typeof url !== 'string' || url.length > 2048 ||
+        !/^(https?:\/\/)?(www\.)?credly\.com\/users\/[a-zA-Z0-9._-]+\/?$/i.test(url)) {
         return res.status(400).json({ error: 'Invalid Credly profile URL.' });
     }
 
@@ -332,14 +444,17 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // Remove a profile
-app.delete('/api/profiles', (req, res) => {
+app.delete('/api/profiles', authLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
-    if (!country || !url) {
+    if (!country || typeof country !== 'string' || !url || typeof url !== 'string') {
         return res.status(400).json({ error: 'Country and URL are required.' });
+    }
+    if (country.length > 100 || url.length > 2048) {
+        return res.status(400).json({ error: 'Payload too large.' });
     }
 
     const profiles = readProfiles();
@@ -382,7 +497,7 @@ function getAllPredefinedUsernames() {
                 if (match) allUrls.push(match[1]);
             }
         }
-        return [...new Set(allUrls)];
+        return [...new Set(allUrls)].filter(isValidUsername);
     } catch { return []; }
 }
 
@@ -414,7 +529,7 @@ async function prewarmCache() {
     console.log('[prewarm] Cache warming complete');
 }
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
     prewarmCache();
 });
