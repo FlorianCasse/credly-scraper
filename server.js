@@ -2,14 +2,31 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+if (!PASSWORD || typeof PASSWORD !== 'string' || PASSWORD.length < 12) {
+    console.error('FATAL: APP_PASSWORD environment variable must be set and at least 12 characters long.');
+    console.error('Refusing to start with a weak or missing password.');
+    process.exit(1);
+}
+
+app.use(express.json({ limit: '32kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+
+// Constant-time password comparison to resist timing attacks.
+function passwordMatches(candidate) {
+    if (typeof candidate !== 'string') return false;
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(PASSWORD);
+    if (a.length !== b.length) return false;
+    try { return crypto.timingSafeEqual(a, b); }
+    catch { return false; }
+}
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -89,6 +106,9 @@ app.get('/api/credly', (req, res) => {
 
     let parsed;
     try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    if (parsed.protocol !== 'https:') {
+        return res.status(403).json({ error: 'Only https URLs are allowed' });
+    }
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
     }
@@ -301,7 +321,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -335,7 +355,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
