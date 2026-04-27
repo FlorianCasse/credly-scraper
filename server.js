@@ -2,11 +2,28 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD || typeof PASSWORD !== 'string' || PASSWORD.length < 8) {
+    console.error('FATAL: APP_PASSWORD environment variable must be set to a value of at least 8 characters.');
+    process.exit(1);
+}
+const PASSWORD_BUF = Buffer.from(PASSWORD, 'utf8');
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
+
+function passwordMatches(candidate) {
+    if (typeof candidate !== 'string') return false;
+    const candBuf = Buffer.from(candidate, 'utf8');
+    if (candBuf.length !== PASSWORD_BUF.length) return false;
+    try {
+        return crypto.timingSafeEqual(candBuf, PASSWORD_BUF);
+    } catch {
+        return false;
+    }
+}
 
 app.use(express.json());
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
@@ -301,7 +318,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -335,7 +352,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
