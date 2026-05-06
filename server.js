@@ -2,14 +2,27 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD || typeof PASSWORD !== 'string' || PASSWORD.length < 8) {
+    console.error('FATAL: APP_PASSWORD environment variable must be set (min 8 chars). Refusing to start.');
+    process.exit(1);
+}
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
-app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+app.use(express.json({ limit: '64kb' }));
+
+// Serve only the explicit set of public static files. Do NOT expose the repo
+// root (which would leak server.js, data/, .git, README, etc.).
+const PUBLIC_FILES = new Set(['index.html', 'script.js', 'style.css']);
+app.get('/:file', (req, res, next) => {
+    const file = req.params.file;
+    if (!PUBLIC_FILES.has(file)) return next();
+    return res.sendFile(path.join(__dirname, file));
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -17,6 +30,17 @@ app.get('/', (req, res) => {
 });
 
 // --- Helpers ---
+
+// Constant-time password comparison. Returns false for any non-string input or
+// length mismatch (which on its own is timing-revealing, but we accept that
+// since we still want to reject obviously wrong inputs cheaply).
+function passwordMatches(provided) {
+    if (typeof provided !== 'string') return false;
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(PASSWORD, 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+}
 
 function readProfiles() {
     try {
@@ -89,6 +113,7 @@ app.get('/api/credly', (req, res) => {
 
     let parsed;
     try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    if (parsed.protocol !== 'https:') return res.status(400).json({ error: 'URL must use https' });
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
     }
@@ -191,10 +216,23 @@ function fetchUrl(url) {
     });
 }
 
+// Validate Credly username to avoid path traversal / open-redirect-style abuse
+// when constructing upstream URLs.
+const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+function validUsername(username) {
+    return typeof username === 'string' && USERNAME_RE.test(username);
+}
+
 async function fetchAllBadges(username) {
+    if (!validUsername(username)) throw new Error('Invalid username');
     const allBadges = [];
     let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
     while (nextUrl) {
+        // Defence-in-depth: ensure pagination URL stays on credly.com
+        try {
+            const u = new URL(nextUrl);
+            if (!ALLOWED_CREDLY_HOSTS.includes(u.hostname) || u.protocol !== 'https:') break;
+        } catch { break; }
         const data = await fetchUrl(nextUrl);
         if (!data.data) break;
         allBadges.push(...data.data);
@@ -204,6 +242,7 @@ async function fetchAllBadges(username) {
 }
 
 async function fetchDisplayName(username) {
+    if (!validUsername(username)) return username;
     try {
         const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
         const user = data.data;
@@ -222,6 +261,9 @@ app.post('/api/batch-badges', async (req, res) => {
     }
     if (usernames.length > 100) {
         return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    }
+    if (!usernames.every(validUsername)) {
+        return res.status(400).json({ error: 'Invalid username format' });
     }
 
     const limit = createConcurrencyLimiter(10);
@@ -252,6 +294,7 @@ app.get('/api/batch-badges-stream', (req, res) => {
     const usernames = raw.split(',').map(u => u.trim()).filter(Boolean);
     if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
     if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    if (!usernames.every(validUsername)) return res.status(400).json({ error: 'Invalid username format' });
 
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -301,13 +344,16 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
     }
-    if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
+    if (country.length > 64) {
+        return res.status(400).json({ error: 'Country name too long.' });
+    }
+    if (!url || typeof url !== 'string' || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
         return res.status(400).json({ error: 'Invalid Credly profile URL.' });
     }
 
@@ -335,7 +381,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
