@@ -308,34 +308,47 @@ function processImage(img, targetWidth, targetHeight) {
     return canvas;
 }
 
-// Create badge card element
+// Small helper to create an element with a class and text content (no HTML parsing)
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+}
+
+// Create badge card element (XSS-safe: no innerHTML on untrusted data)
 function createBadgeCard(badge, canvas, index) {
-    const card = document.createElement('div');
-    card.className = 'badge-card';
+    const card = el('div', 'badge-card');
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
 
-    card.innerHTML = `
-        <div class="badge-image-container">
-            ${canvas ? '' : '<div class="spinner"></div>'}
-        </div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            <div class="badge-meta">Issued: ${issuedAt}</div>
-        </div>
-        <div class="badge-actions">
-            <button class="download-btn" data-index="${index}">Download PNG</button>
-            <button class="view-original-btn" data-url="${badge.image_url}">View Original</button>
-        </div>
-    `;
+    const imgContainer = el('div', 'badge-image-container');
+    if (!canvas) imgContainer.appendChild(el('div', 'spinner'));
+    else imgContainer.appendChild(canvas);
+    card.appendChild(imgContainer);
 
-    if (canvas) {
-        card.querySelector('.badge-image-container').appendChild(canvas);
-    }
+    const info = el('div', 'badge-info');
+    info.appendChild(el('div', 'badge-name', badgeName));
+    info.appendChild(el('div', 'badge-meta', `Issued: ${issuedAt}`));
+    card.appendChild(info);
 
-    card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    const actions = el('div', 'badge-actions');
+    const dlBtn = el('button', 'download-btn', 'Download PNG');
+    dlBtn.dataset.index = String(index);
+    dlBtn.addEventListener('click', () => handleDownloadSingle(index, badgeName));
+    actions.appendChild(dlBtn);
+
+    const viewBtn = el('button', 'view-original-btn', 'View Original');
+    viewBtn.addEventListener('click', () => {
+        // window.open with a captured URL string; don't put it in an attribute
+        const u = badge.image_url;
+        if (typeof u === 'string' && /^https?:\/\//i.test(u)) {
+            window.open(u, '_blank', 'noopener,noreferrer');
+        }
+    });
+    actions.appendChild(viewBtn);
+    card.appendChild(actions);
 
     return card;
 }
@@ -363,7 +376,7 @@ function showTab(tabName) {
 
 // Build and render the "Common Certifications" view
 function renderCommonCertifications() {
-    commonGrid.innerHTML = '';
+    commonGrid.replaceChildren();
 
     const groups = new Map();
     for (let i = 0; i < badges.length; i++) {
@@ -379,10 +392,7 @@ function renderCommonCertifications() {
         .sort((a, b) => b.holders.size - a.holders.size);
 
     if (shared.length === 0) {
-        const msg = document.createElement('p');
-        msg.className = 'no-common-msg';
-        msg.textContent = 'No certifications in common between the selected profiles.';
-        commonGrid.appendChild(msg);
+        commonGrid.appendChild(el('p', 'no-common-msg', 'No certifications in common between the selected profiles.'));
         return;
     }
 
@@ -391,45 +401,49 @@ function renderCommonCertifications() {
     }
 }
 
-// Create a card for the Common Certifications view
+// Create a card for the Common Certifications view (XSS-safe)
 function createCommonCard(badge, globalIndex, holders) {
-    const card = document.createElement('div');
-    card.className = 'badge-card';
+    const card = el('div', 'badge-card');
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuer = badge.badge_template?.issuer_org_name || '';
     const holderCount = holders.size;
-    const holdersHtml = Array.from(holders)
-        .map(h => `<span class="holder-tag">${userDisplayNames[h] || h}</span>`)
-        .join('');
 
-    card.innerHTML = `
-        <div class="badge-image-container"></div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            ${issuer ? `<div class="badge-meta">${issuer}</div>` : ''}
-            <div class="badge-meta holders-count">${holderCount} ${holderCount === 1 ? 'person' : 'people'}</div>
-        </div>
-        <div class="holders-list">${holdersHtml}</div>
-    `;
+    const imgContainer = el('div', 'badge-image-container');
+    card.appendChild(imgContainer);
+
+    const info = el('div', 'badge-info');
+    info.appendChild(el('div', 'badge-name', badgeName));
+    if (issuer) info.appendChild(el('div', 'badge-meta', issuer));
+    info.appendChild(el('div', 'badge-meta holders-count', `${holderCount} ${holderCount === 1 ? 'person' : 'people'}`));
+    card.appendChild(info);
+
+    const holdersList = el('div', 'holders-list');
+    Array.from(holders).forEach(h => {
+        const tagText = userDisplayNames[h] || h;
+        holdersList.appendChild(el('span', 'holder-tag', tagText));
+    });
+    card.appendChild(holdersList);
 
     const canvas = processedBadges[globalIndex];
-    const container = card.querySelector('.badge-image-container');
     if (canvas) {
         const img = document.createElement('img');
         img.src = canvas.toDataURL('image/png');
         img.style.cssText = 'max-width:100%;max-height:100%;display:block;';
-        container.appendChild(img);
+        imgContainer.appendChild(img);
     } else {
-        container.innerHTML = '<div style="color:#dc3545;font-size:0.875rem;">Image not available</div>';
+        const fail = document.createElement('div');
+        fail.style.cssText = 'color:#dc3545;font-size:0.875rem;';
+        fail.textContent = 'Image not available';
+        imgContainer.appendChild(fail);
     }
 
     return card;
 }
 
-// Build and render the "By Certification" view as a simple table
+// Build and render the "By Certification" view as a simple table (XSS-safe)
 function renderByCertification() {
-    certificationGrid.innerHTML = '';
+    certificationGrid.replaceChildren();
 
     const groups = new Map();
     for (let i = 0; i < badges.length; i++) {
@@ -444,23 +458,27 @@ function renderByCertification() {
         .sort((a, b) => b.holders.size - a.holders.size);
 
     if (sorted.length === 0) {
-        certificationGrid.innerHTML = '<p class="no-common-msg">No certifications found.</p>';
+        certificationGrid.appendChild(el('p', 'no-common-msg', 'No certifications found.'));
         return;
     }
 
-    const table = document.createElement('table');
-    table.className = 'certification-table';
-    table.innerHTML = `
-        <thead>
-            <tr><th>Certification</th><th>Holders</th></tr>
-        </thead>
-        <tbody>
-            ${sorted.map(({ badge, holders }) => {
-                const name = badge.badge_template?.name || badge.name || 'Unknown';
-                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
-            }).join('')}
-        </tbody>
-    `;
+    const table = el('table', 'certification-table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headRow.appendChild(el('th', null, 'Certification'));
+    headRow.appendChild(el('th', null, 'Holders'));
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    sorted.forEach(({ badge, holders }) => {
+        const name = badge.badge_template?.name || badge.name || 'Unknown';
+        const tr = document.createElement('tr');
+        tr.appendChild(el('td', null, name));
+        tr.appendChild(el('td', null, String(holders.size)));
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
     certificationGrid.appendChild(table);
 }
 
@@ -483,7 +501,7 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
         (!filterDate || (b.issued_at && new Date(b.issued_at) >= filterDate))
     );
 
-    // Render profile header
+    // Render profile header (textContent, never innerHTML)
     const header = document.createElement('div');
     header.className = 'profile-header';
     header.textContent = profileBadges.length === 0
@@ -515,7 +533,7 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
             const imgContainer = cards[i].querySelector('.badge-image-container');
 
             if (!imageUrl) {
-                imgContainer.innerHTML = '';
+                imgContainer.replaceChildren();
                 return;
             }
 
@@ -535,10 +553,12 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
                 canvas.getContext('2d').drawImage(originalCanvas, 0, 0);
 
                 processedBadges[globalIndex] = canvas;
-                imgContainer.innerHTML = '';
-                imgContainer.appendChild(canvas);
+                imgContainer.replaceChildren(canvas);
             } catch {
-                imgContainer.innerHTML = '<div style="color:#dc3545;font-size:0.875rem;">Failed to load</div>';
+                const fail = document.createElement('div');
+                fail.style.cssText = 'color:#dc3545;font-size:0.875rem;';
+                fail.textContent = 'Failed to load';
+                imgContainer.replaceChildren(fail);
             }
 
             // Update running total as images resolve
@@ -550,9 +570,9 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
 // Handle fetch badges (SSE streaming)
 async function handleFetchBadges() {
     hideMessages();
-    badgesGrid.innerHTML = '';
-    commonGrid.innerHTML = '';
-    certificationGrid.innerHTML = '';
+    badgesGrid.replaceChildren();
+    commonGrid.replaceChildren();
+    certificationGrid.replaceChildren();
     resultsTabsEl.style.display = 'none';
     badgesGrid.style.display = 'grid';
     resultsSection.style.display = 'none';
@@ -779,7 +799,7 @@ async function handleDownloadAll() {
             const badge = badges[i];
             const username = badge._username || 'unknown';
             const badgeName = badge.badge_template?.name || badge.name || `badge_${i + 1}`;
-            const filename = `${username}/${i + 1}_${sanitizeFilename(badgeName)}_processed.png`;
+            const filename = `${sanitizeFilename(username)}/${i + 1}_${sanitizeFilename(badgeName)}_processed.png`;
 
             const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
             zip.file(filename, blob);
@@ -807,10 +827,12 @@ async function handleDownloadAll() {
 // Escape a value for CSV
 function escapeCSV(value) {
     const str = String(value ?? '');
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
+    // Defuse spreadsheet formula injection by prefixing risk characters
+    const guarded = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+    if (guarded.includes(',') || guarded.includes('"') || guarded.includes('\n')) {
+        return `"${guarded.replace(/"/g, '""')}"`;
     }
-    return str;
+    return guarded;
 }
 
 // Get the currently active tab name
@@ -900,19 +922,16 @@ async function updateTextareaFromCheckboxes() {
     profileUrlInput.value = [...manualLines, ...countryLines].join('\n');
 }
 
-// Render country pill checkboxes from merged profiles
+// Render country pill checkboxes from merged profiles (XSS-safe)
 async function initQuickSelect() {
     const container = document.getElementById('quick-select');
     if (!container) return;
-    container.innerHTML = '';
+    container.replaceChildren();
 
-    const title = document.createElement('p');
-    title.className = 'quick-select-title';
-    title.textContent = 'Quick select by country';
+    const title = el('p', 'quick-select-title', 'Quick select by country');
     container.appendChild(title);
 
-    const pills = document.createElement('div');
-    pills.className = 'country-pills';
+    const pills = el('div', 'country-pills');
     container.appendChild(pills);
 
     const allProfiles = await getAllProfiles();
@@ -920,12 +939,15 @@ async function initQuickSelect() {
         const label = document.createElement('label');
         label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
         label.dataset.country = country;
-        label.innerHTML = `
-            <input type="checkbox">
-            <span>${country}</span>
-            <span class="country-pill-count">(${urls.length})</span>
-        `;
-        label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        label.appendChild(cb);
+
+        label.appendChild(el('span', null, country));
+        label.appendChild(el('span', 'country-pill-count', `(${urls.length})`));
+
+        cb.addEventListener('change', updateTextareaFromCheckboxes);
         pills.appendChild(label);
     }
 
@@ -933,37 +955,41 @@ async function initQuickSelect() {
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'add-profile-btn';
-    addBtn.innerHTML = '<span class="plus-icon">+</span> Add Profile';
+    const plus = el('span', 'plus-icon', '+');
+    addBtn.appendChild(plus);
+    addBtn.appendChild(document.createTextNode(' Add Profile'));
     addBtn.addEventListener('click', openAddProfileModal);
     pills.appendChild(addBtn);
 
-    // Render custom profiles list (removable)
+    // Render custom profiles list (removable) - XSS-safe
     const custom = cachedCustomProfiles || {};
     const customEntries = Object.entries(custom).flatMap(([country, urls]) =>
         urls.map(url => ({ country, url }))
     );
     if (customEntries.length > 0) {
-        const listContainer = document.createElement('div');
-        listContainer.className = 'custom-profiles-list';
+        const listContainer = el('div', 'custom-profiles-list');
+        listContainer.appendChild(el('p', 'quick-select-title', 'Your added profiles'));
 
-        const listTitle = document.createElement('p');
-        listTitle.className = 'quick-select-title';
-        listTitle.textContent = 'Your added profiles';
-        listContainer.appendChild(listTitle);
-
-        const list = document.createElement('div');
-        list.className = 'custom-profiles-tags';
+        const list = el('div', 'custom-profiles-tags');
         for (const { country, url } of customEntries) {
             const username = url.match(/\/users\/([^\/\s#?]+)/i)?.[1] || url;
-            const tag = document.createElement('span');
-            tag.className = 'custom-profile-tag';
-            tag.innerHTML = `
-                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
-                <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
-            `;
-            tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
-                removeCustomProfile(country, url);
-            });
+            const tag = el('span', 'custom-profile-tag');
+
+            const text = el('span', 'custom-profile-tag-text');
+            text.appendChild(document.createTextNode(`${username} `));
+            const small = document.createElement('small');
+            small.textContent = `(${country})`;
+            text.appendChild(small);
+            tag.appendChild(text);
+
+            const rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'custom-profile-remove';
+            rm.title = 'Remove this profile';
+            rm.textContent = '×';
+            rm.addEventListener('click', () => removeCustomProfile(country, url));
+            tag.appendChild(rm);
+
             list.appendChild(tag);
         }
         listContainer.appendChild(list);
@@ -1016,9 +1042,15 @@ async function openAddProfileModal() {
     modalError.style.display = 'none';
     newCountryGroup.style.display = 'none';
 
-    // Populate country dropdown
+    // Populate country dropdown (textContent only)
     const allProfiles = await getAllProfiles();
-    countrySelect.innerHTML = '<option value="" disabled selected>Select a country...</option>';
+    countrySelect.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = 'Select a country...';
+    countrySelect.appendChild(placeholder);
     for (const country of Object.keys(allProfiles).sort()) {
         const opt = document.createElement('option');
         opt.value = country;
