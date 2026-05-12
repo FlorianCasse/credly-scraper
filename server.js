@@ -2,14 +2,56 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+// Trust the first proxy hop (Heroku/Render/Cloudflare) so rate-limiter sees
+// the real client IP, not the proxy. Safe in single-proxy deployments.
+app.set('trust proxy', 1);
+
+// Sensible security headers. CSP intentionally permits the cdnjs script tag
+// already present in index.html and the data: URLs used by the badge canvas.
+app.use(helmet({
+    contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", 'https://cdnjs.cloudflare.com'],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'img-src': ["'self'", 'data:', 'blob:'],
+            'connect-src': ["'self'"],
+            'frame-ancestors': ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false, // images served via proxy are same-origin
+}));
+
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+
+// --- Rate limiters ---
+// Brute-force-resistant limit on password-gated mutating endpoints.
+const profilesWriteLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20,                  // 20 write attempts per IP per window
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, slow down.' },
+});
+
+// Looser limit for read/proxy traffic.
+const proxyLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, slow down.' },
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -83,7 +125,7 @@ function setCache(key, buffer, contentType) {
 
 const ALLOWED_CREDLY_HOSTS = ['www.credly.com', 'credly.com', 'images.credly.com'];
 
-app.get('/api/credly', (req, res) => {
+app.get('/api/credly', proxyLimiter, (req, res) => {
     const credlyUrl = req.query.url;
     if (!credlyUrl) return res.status(400).json({ error: 'Missing url parameter' });
 
@@ -215,7 +257,7 @@ async function fetchDisplayName(username) {
     return username;
 }
 
-app.post('/api/batch-badges', async (req, res) => {
+app.post('/api/batch-badges', proxyLimiter, async (req, res) => {
     const { usernames } = req.body;
     if (!Array.isArray(usernames) || usernames.length === 0) {
         return res.status(400).json({ error: 'usernames array is required' });
@@ -245,7 +287,7 @@ app.post('/api/batch-badges', async (req, res) => {
 
 // --- SSE Streaming Batch Endpoint ---
 
-app.get('/api/batch-badges-stream', (req, res) => {
+app.get('/api/batch-badges-stream', proxyLimiter, (req, res) => {
     const raw = req.query.usernames;
     if (!raw) return res.status(400).json({ error: 'usernames query parameter is required' });
 
@@ -298,7 +340,7 @@ app.get('/api/profiles', (req, res) => {
 });
 
 // Add a profile
-app.post('/api/profiles', (req, res) => {
+app.post('/api/profiles', profilesWriteLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
@@ -332,7 +374,7 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // Remove a profile
-app.delete('/api/profiles', (req, res) => {
+app.delete('/api/profiles', profilesWriteLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
