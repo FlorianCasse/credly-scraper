@@ -9,6 +9,18 @@ let renderedTabs = { common: false, 'by-certification': false };
 // Custom profiles from server API
 let cachedCustomProfiles = null;
 
+// Escape untrusted text before placing into innerHTML interpolations.
+// Use this for any string that may originate from the Credly API or user input.
+function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 async function loadCustomProfiles() {
     try {
         const res = await fetch('/api/profiles');
@@ -315,18 +327,19 @@ function createBadgeCard(badge, canvas, index) {
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
+    const imageUrl = badge.image_url || '';
 
     card.innerHTML = `
         <div class="badge-image-container">
             ${canvas ? '' : '<div class="spinner"></div>'}
         </div>
         <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            <div class="badge-meta">Issued: ${issuedAt}</div>
+            <div class="badge-name">${escapeHtml(badgeName)}</div>
+            <div class="badge-meta">Issued: ${escapeHtml(issuedAt)}</div>
         </div>
         <div class="badge-actions">
             <button class="download-btn" data-index="${index}">Download PNG</button>
-            <button class="view-original-btn" data-url="${badge.image_url}">View Original</button>
+            <button class="view-original-btn">View Original</button>
         </div>
     `;
 
@@ -335,7 +348,12 @@ function createBadgeCard(badge, canvas, index) {
     }
 
     card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    card.querySelector('.view-original-btn').addEventListener('click', () => {
+        // Only allow opening if URL passes a basic safety check
+        if (typeof imageUrl === 'string' && /^https?:\/\//i.test(imageUrl)) {
+            window.open(imageUrl, '_blank', 'noopener,noreferrer');
+        }
+    });
 
     return card;
 }
@@ -400,14 +418,14 @@ function createCommonCard(badge, globalIndex, holders) {
     const issuer = badge.badge_template?.issuer_org_name || '';
     const holderCount = holders.size;
     const holdersHtml = Array.from(holders)
-        .map(h => `<span class="holder-tag">${userDisplayNames[h] || h}</span>`)
+        .map(h => `<span class="holder-tag">${escapeHtml(userDisplayNames[h] || h)}</span>`)
         .join('');
 
     card.innerHTML = `
         <div class="badge-image-container"></div>
         <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            ${issuer ? `<div class="badge-meta">${issuer}</div>` : ''}
+            <div class="badge-name">${escapeHtml(badgeName)}</div>
+            ${issuer ? `<div class="badge-meta">${escapeHtml(issuer)}</div>` : ''}
             <div class="badge-meta holders-count">${holderCount} ${holderCount === 1 ? 'person' : 'people'}</div>
         </div>
         <div class="holders-list">${holdersHtml}</div>
@@ -457,7 +475,7 @@ function renderByCertification() {
         <tbody>
             ${sorted.map(({ badge, holders }) => {
                 const name = badge.badge_template?.name || badge.name || 'Unknown';
-                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
+                return `<tr><td>${escapeHtml(name)}</td><td>${holders.size}</td></tr>`;
             }).join('')}
         </tbody>
     `;
@@ -806,7 +824,11 @@ async function handleDownloadAll() {
 
 // Escape a value for CSV
 function escapeCSV(value) {
-    const str = String(value ?? '');
+    let str = String(value ?? '');
+    // Defend against CSV/spreadsheet formula injection (CWE-1236)
+    if (/^[=+\-@\t\r]/.test(str)) {
+        str = `'${str}`;
+    }
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return `"${str.replace(/"/g, '""')}"`;
     }
@@ -922,7 +944,7 @@ async function initQuickSelect() {
         label.dataset.country = country;
         label.innerHTML = `
             <input type="checkbox">
-            <span>${country}</span>
+            <span>${escapeHtml(country)}</span>
             <span class="country-pill-count">(${urls.length})</span>
         `;
         label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
@@ -958,7 +980,7 @@ async function initQuickSelect() {
             const tag = document.createElement('span');
             tag.className = 'custom-profile-tag';
             tag.innerHTML = `
-                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
+                <span class="custom-profile-tag-text">${escapeHtml(username)} <small>(${escapeHtml(country)})</small></span>
                 <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
             `;
             tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
