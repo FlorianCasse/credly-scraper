@@ -1,58 +1,77 @@
 # Security Review: credly-scraper
 
-**Date:** 2026-04-17 (re-run)
-**Reviewer:** Claude (automated security review)
-**Language/Framework:** Node.js / Express
-**Dependency Manager:** npm (package.json)
-
-## Status: Findings Persist on `main` — Multiple PRs Pending Merge
-
-This re-run confirms that all previously identified findings remain present on `main`. Twelve PRs (#1, #3, #4, #5, #7, #8, #9, #10, #11, #12) already address these findings but **none have been merged**. No new PRs were opened in this run to avoid further duplication.
+_Last review: 2026-05-20_
 
 ## Summary
-- Total findings: 5 (unchanged)
-- Critical: 1 | High: 1 | Medium: 2 | Low: 1
-- PRs opened this run: 0 (existing PRs already cover all findings)
-- Issues opened this run: 0 (Issues are disabled in this repository)
+- Total findings: 8
+- Critical: 1 | High: 1 | Medium: 4 | Low: 2
+- PRs opened: 1 (consolidated on `claude/intelligent-johnson-TSC54`)
+- Issues opened: 0 (all findings are PR-ready and bundled in the consolidated PR)
+
+> Note: this repository has many open PRs from prior security review runs that
+> were never merged. This run consolidates all fixes onto the assigned branch
+> per the task's branch policy.
 
 ## Findings
 
-### [CRITICAL] Hardcoded password fallback in server.js
+### [CRITICAL] Hardcoded default password in server.js
 - **File:** `server.js` (line 8)
-- **Status on main:** STILL PRESENT — `const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';`
-- **Description:** The `PASSWORD` constant uses a hardcoded fallback `certificationitq1!` when `APP_PASSWORD` is unset. Public source = anyone can authenticate.
-- **Remediation:** Remove the fallback; require the env var; exit if missing.
+- **Description:** `const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';` ships a real, working admin password in the public source tree. Anyone with read access to the repository can authenticate to `POST` / `DELETE /api/profiles` on any deployment that has not overridden `APP_PASSWORD`.
+- **Remediation:** Require `APP_PASSWORD` from the environment, refuse to start without it (>= 12 chars), and compare candidates with `crypto.timingSafeEqual` over SHA-256 digests to eliminate the timing side channel.
 - **PR-ready:** yes
-- **Existing PRs:** #1, #3, #4, #7, #11, #12 — pick one and merge
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-### [HIGH] XSS risk via innerHTML with untrusted external data
-- **File:** `script.js` (`createBadgeCard()`, `createCommonCard()`, `renderByCertification()`)
-- **Description:** Multiple `innerHTML` assignments interpolate badge data from the Credly API without sanitization.
-- **Remediation:** Replace with `textContent` / `createElement()`, or apply DOMPurify.
+### [HIGH] XSS via innerHTML interpolation with untrusted Credly data
+- **File:** `script.js` (`createBadgeCard`, `createCommonCard`, `renderByCertification`, `initQuickSelect`, custom-profile rendering)
+- **Description:** Multiple `innerHTML` assignments interpolate `badge_template.name`, `issuer_org_name`, holder display names, and user-supplied country names directly into HTML. A compromised Credly API response, or any user-supplied country string with HTML in it, becomes script execution in any other viewer's browser (stored XSS for the custom-profiles store).
+- **Remediation:** Replace every `innerHTML` assignment in the affected functions with `createElement` + `textContent`. Open the original badge image via a closure-captured `window.open(url, '_blank', 'noopener,noreferrer')` rather than embedding it in a `data-url` attribute.
 - **PR-ready:** yes
-- **Existing PRs:** #5, #9 — pick one and merge
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-### [MEDIUM] Missing security headers on Express server
-- **File:** `server.js`
-- **Description:** No `helmet` middleware; no CSP, HSTS, X-Frame-Options, etc.
-- **Remediation:** Add `helmet` and apply as middleware.
+### [MEDIUM] Missing security headers (no helmet)
+- **File:** `server.js` (top-of-file setup)
+- **Description:** No `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, or HSTS are emitted. Clickjacking, MIME sniffing, and reflected-XSS protections are absent.
+- **Remediation:** Mount `helmet()` with a CSP that allows only the cdnjs origin used by `index.html` and `data:`/`blob:` images required by the badge canvas. Disable `x-powered-by`.
 - **PR-ready:** yes
-- **Existing PRs:** #3, #5, #8 — pick one and merge
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-### [MEDIUM] No rate limiting on API endpoints
-- **File:** `server.js`
-- **Description:** Password endpoints brute-forceable; proxy endpoints abusable for DoS.
-- **Remediation:** Add `express-rate-limit`.
+### [MEDIUM] No rate limiting on auth and proxy endpoints
+- **File:** `server.js` (`POST/DELETE /api/profiles`, `/api/credly`, `/api/batch-badges`, `/api/batch-badges-stream`)
+- **Description:** Auth endpoints are brute-forceable; proxy endpoints can be abused as a free Credly egress relay or to exhaust bandwidth.
+- **Remediation:** Mount `express-rate-limit`: a strict policy (20 req / 15 min) on write endpoints and a looser one (120 req / min) on the Credly proxy / batch endpoints. Configure `trust proxy` so the limiter sees the real client IP behind a single reverse-proxy hop.
 - **PR-ready:** yes
-- **Existing PRs:** #3, #8 — partial coverage
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-### [LOW] No HTTPS enforcement
-- **File:** `server.js`
-- **Description:** Plain HTTP exposes the password in transit.
-- **Remediation:** Deploy behind a TLS-terminating reverse proxy.
-- **PR-ready:** no (deployment concern)
-- **Action:** Documented; no PR opened
+### [MEDIUM] `express.static(__dirname)` exposes the entire repository root
+- **File:** `server.js` (line 12)
+- **Description:** Serving `__dirname` with extension whitelisting still serves `server.js`, `package.json`, `data/custom-profiles.json` (the user list), and `credly_badge_downloader.sh` when requested by exact path. Any file added at the root will become reachable.
+- **Remediation:** Drop `express.static` and add explicit `app.get` handlers for the closed set of public files (`/index.html`, `/script.js`, `/style.css`, `/`).
+- **PR-ready:** yes
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-## Recommendation
+### [MEDIUM] No JSON body size limit
+- **File:** `server.js` (line 11)
+- **Description:** `express.json()` accepts the default 100 KB body. With no auth on most endpoints, an attacker can submit large payloads to exhaust memory. Cap the body well below the default for an API with very small payloads.
+- **Remediation:** `app.use(express.json({ limit: '64kb' }))`.
+- **PR-ready:** yes
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
 
-The priority is to **review and merge one of the existing PRs**, not to open more. The accumulation of 12 unmerged security PRs represents technical debt and review fatigue. Suggest closing duplicate PRs and merging PR #12 (most recent comprehensive fix for the CRITICAL finding) plus PR #5 or #9 for the XSS fix.
+### [LOW] Unauthenticated cache statistics endpoint
+- **File:** `server.js` (line 132)
+- **Description:** `GET /api/cache-stats` returns the number of cached entries and current cache size to anonymous clients. Mostly reconnaissance value, but there is no reason to expose it.
+- **Remediation:** Gate the endpoint behind the same `APP_PASSWORD` check as the write endpoints.
+- **PR-ready:** yes
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
+
+### [LOW] No SSRF defence-in-depth on `/api/credly` URL protocol
+- **File:** `server.js` (line 86)
+- **Description:** The proxy already checks the hostname allowlist but does not explicitly require `https:`. A request like `?url=ftp://www.credly.com/...` would currently be host-accepted before any HTTP call is made.
+- **Remediation:** Reject any parsed URL whose `protocol !== 'https:'` before continuing.
+- **PR-ready:** yes
+- **Action taken:** Fixed in consolidated PR on `claude/intelligent-johnson-TSC54`.
+
+## Verification Notes
+
+The reviewer also independently re-verified the prior `security-review-credly-scraper.md` findings and confirmed each unfixed item against the actual source. Username validation (`/^[A-Za-z0-9._-]{1,64}$/`) was added in `safeUsername()` and applied in `fetchAllBadges`, `fetchDisplayName`, `POST /api/batch-badges`, and `GET /api/batch-badges-stream` as defence-in-depth before splicing usernames into upstream URLs.
+
+Upstream error messages echoed back to clients (`err.message`) were replaced with a generic `"Fetch failed"` to avoid leaking internal stack frames or upstream details.
