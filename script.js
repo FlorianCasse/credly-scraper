@@ -4,7 +4,7 @@ let processedBadges = [];
 let userDisplayNames = {}; // username -> "First Last"
 const imageCache = new Map(); // imageUrl -> Promise<canvas> (deduplication)
 let tabsDirty = false; // true when badges data changed since last tab render
-let renderedTabs = { common: false, 'by-certification': false };
+let renderedTabs = { common: false, 'by-certification': false, qbr: false };
 
 // Custom profiles from server API
 let cachedCustomProfiles = null;
@@ -121,6 +121,46 @@ const PREDEFINED_PROFILES = {
     ],
 };
 
+// QBR (Broadcom Quarterly Business Review) matrix: country code -> display name in PREDEFINED_PROFILES / custom-profiles
+// Order matches Bertwin's KPI spreadsheet headers.
+const QBR_COUNTRIES = [
+    { code: 'BE', name: 'Belgium' },
+    { code: 'DE', name: 'Germany' },
+    { code: 'DK', name: 'Denmark' },
+    { code: 'FR', name: 'France' },
+    { code: 'LU', name: 'Luxembourg' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'NO', name: 'Norway' },
+    { code: 'SW', name: 'Sweden' },
+];
+
+// Badge classifier for the QBR Report tab. Regex defaults below are tuned against
+// observed Broadcom/VMware badge names — refine in the "By Certification" tab if a
+// new badge family appears.
+const QBR_CATEGORIES = [
+    {
+        key: 'knights',
+        label: '#Knights',
+        // No "Knight" badges in Credly today — keeping a permissive match so future
+        // ones (VCF Knight, vRealize Knight, etc.) are picked up automatically.
+        test: name => /knight/i.test(name),
+    },
+    {
+        key: 'vcf_vcp_v9',
+        label: '#VCF VCP v9 (Implement/Architect)',
+        // VCF VCP v9 = "VMware Certified Professional - VMware Cloud Foundation Administrator|Architect"
+        // ending exactly there (newer "v9" line); legacy year-suffixed variants like
+        // "Administrator 2024" are excluded.
+        test: name => /Certified Professional\s*[-–]\s*VMware Cloud Foundation (Administrator|Architect)\s*$/i.test(name),
+    },
+    {
+        key: 'vcf_spec_vcap',
+        label: '#VCF Specializations v9 (VCAP)',
+        // VCAP-level VCF specializations: "VMware Certified Advanced Professional - VMware Cloud Foundation <Track>"
+        test: name => /Certified Advanced Professional\s*[-–]\s*VMware Cloud Foundation/i.test(name),
+    },
+];
+
 // DOM elements
 const profileUrlInput = document.getElementById('profile-url');
 const filterKeywordInput = document.getElementById('filter-keyword');
@@ -134,6 +174,7 @@ const resultsSection = document.getElementById('results-section');
 const resultsTabsEl = document.getElementById('results-tabs');
 const commonGrid = document.getElementById('common-grid');
 const certificationGrid = document.getElementById('certification-grid');
+const qbrGrid = document.getElementById('qbr-grid');
 const badgesGrid = document.getElementById('badges-grid');
 const badgeCount = document.getElementById('badge-count');
 const btnText = fetchBtn.querySelector('.btn-text');
@@ -347,6 +388,7 @@ function showTab(tabName) {
     });
     commonGrid.style.display = tabName === 'common' ? 'grid' : 'none';
     certificationGrid.style.display = tabName === 'by-certification' ? 'block' : 'none';
+    qbrGrid.style.display = tabName === 'qbr' ? 'block' : 'none';
     badgesGrid.style.display = tabName === 'by-profile' ? 'grid' : 'none';
 
     // Lazy render: only compute when tab is first shown or data changed
@@ -357,6 +399,10 @@ function showTab(tabName) {
     if (tabName === 'by-certification' && (tabsDirty || !renderedTabs['by-certification'])) {
         renderByCertification();
         renderedTabs['by-certification'] = true;
+    }
+    if (tabName === 'qbr' && (tabsDirty || !renderedTabs.qbr)) {
+        renderQBRReport();
+        renderedTabs.qbr = true;
     }
     if (tabsDirty) tabsDirty = false;
 }
@@ -464,6 +510,124 @@ function renderByCertification() {
     certificationGrid.appendChild(table);
 }
 
+// Build a username -> country lookup from the merged profile map
+async function buildUsernameToCountry() {
+    const allProfiles = await getAllProfiles();
+    const map = new Map();
+    for (const [country, urls] of Object.entries(allProfiles)) {
+        for (const url of urls) {
+            const username = normalizeProfileUrl(url);
+            map.set(username, country);
+        }
+    }
+    return map;
+}
+
+// Compute the QBR matrix: { [country]: { profilesFetched, [categoryKey]: holderCount } }
+async function computeQBRMatrix() {
+    const usernameToCountry = await buildUsernameToCountry();
+
+    // For each category, collect distinct usernames per country
+    const result = {};
+    for (const { name } of QBR_COUNTRIES) {
+        result[name] = { profilesFetched: new Set() };
+        for (const cat of QBR_CATEGORIES) {
+            result[name][cat.key] = new Set();
+        }
+    }
+
+    for (const badge of badges) {
+        const username = badge._username;
+        if (!username) continue;
+        const country = usernameToCountry.get(username.toLowerCase()) || usernameToCountry.get(username);
+        if (!country || !result[country]) continue;
+
+        result[country].profilesFetched.add(username);
+        const badgeName = badge.badge_template?.name || badge.name || '';
+        for (const cat of QBR_CATEGORIES) {
+            if (cat.test(badgeName)) {
+                result[country][cat.key].add(username);
+            }
+        }
+    }
+    return result;
+}
+
+// Render the QBR matrix (countries × KPI categories)
+async function renderQBRReport() {
+    qbrGrid.innerHTML = '<p class="no-common-msg">Computing QBR matrix…</p>';
+
+    const matrix = await computeQBRMatrix();
+    const allProfiles = await getAllProfiles();
+
+    qbrGrid.innerHTML = '';
+
+    const note = document.createElement('p');
+    note.className = 'qbr-note';
+    note.innerHTML = 'Counts are distinct profile holders per country, computed from the badges currently loaded. ' +
+        '"—" means no profiles have been ingested for that country yet.';
+    qbrGrid.appendChild(note);
+
+    const table = document.createElement('table');
+    table.className = 'certification-table qbr-table';
+
+    const headerCells = ['Country', ...QBR_CATEGORIES.map(c => c.label), 'Profiles fetched']
+        .map(h => `<th>${h}</th>`).join('');
+
+    const bodyRows = QBR_COUNTRIES.map(({ code, name }) => {
+        const hasProfiles = (allProfiles[name] || []).length > 0;
+        const row = matrix[name];
+        const fetchedCount = row.profilesFetched.size;
+
+        const kpiCells = QBR_CATEGORIES.map(cat => {
+            if (!hasProfiles) return '<td class="qbr-empty">—</td>';
+            return `<td>${row[cat.key].size}</td>`;
+        }).join('');
+
+        const fetchedCell = hasProfiles
+            ? `<td>${fetchedCount} / ${(allProfiles[name] || []).length}</td>`
+            : '<td class="qbr-empty">—</td>';
+
+        return `<tr><td><strong>${code}</strong> &nbsp;<span class="qbr-country-name">${name}</span></td>${kpiCells}${fetchedCell}</tr>`;
+    }).join('');
+
+    table.innerHTML = `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody>`;
+    qbrGrid.appendChild(table);
+
+    const hint = document.createElement('p');
+    hint.className = 'qbr-note qbr-note--hint';
+    hint.innerHTML = 'Click <strong>Export CSV</strong> while this tab is active to download the matrix in Bertwin\'s spreadsheet shape (KPIs as rows, country codes as columns).';
+    qbrGrid.appendChild(hint);
+}
+
+// Export the QBR matrix as CSV: rows = KPIs, columns = country codes (matches Bertwin's template)
+async function exportQBRCSV() {
+    const matrix = await computeQBRMatrix();
+    const allProfiles = await getAllProfiles();
+
+    const headerRow = ['KPI', ...QBR_COUNTRIES.map(c => c.code)];
+    const rows = [headerRow];
+
+    for (const cat of QBR_CATEGORIES) {
+        const row = [cat.label];
+        for (const { name } of QBR_COUNTRIES) {
+            const hasProfiles = (allProfiles[name] || []).length > 0;
+            row.push(hasProfiles ? matrix[name][cat.key].size : '');
+        }
+        rows.push(row);
+    }
+
+    const fetchedRow = ['Profiles fetched'];
+    for (const { name } of QBR_COUNTRIES) {
+        const hasProfiles = (allProfiles[name] || []).length > 0;
+        fetchedRow.push(hasProfiles ? matrix[name].profilesFetched.size : '');
+    }
+    rows.push(fetchedRow);
+
+    const csv = rows.map(row => row.map(escapeCSV).join(',')).join('\n');
+    downloadCSV(csv, 'credly_qbr_kpis.csv');
+}
+
 // Sanitize filename
 function sanitizeFilename(name) {
     return name
@@ -561,7 +725,7 @@ async function handleFetchBadges() {
     processedBadges = [];
     userDisplayNames = {};
     tabsDirty = false;
-    renderedTabs = { common: false, 'by-certification': false };
+    renderedTabs = { common: false, 'by-certification': false, qbr: false };
 
     const rawInput = profileUrlInput.value.trim();
     const keyword = filterKeywordInput.value.trim();
@@ -828,6 +992,10 @@ function handleExportCSV() {
 
     if (getActiveTab() === 'by-certification') {
         return exportCertificationCSV();
+    }
+
+    if (getActiveTab() === 'qbr') {
+        return exportQBRCSV();
     }
 
     const headers = ['Profile', 'Name', 'Issuer', 'Issued At', 'Expires At', 'Badge URL', 'Image URL'];
