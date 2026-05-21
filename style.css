@@ -712,6 +712,44 @@ footer a:hover {
     background: #f0f6ff;
 }
 
+/* QBR Report table — overrides certification-table defaults to handle a wider matrix */
+.qbr-table th:last-child,
+.qbr-table td:last-child {
+    width: auto;
+}
+
+.qbr-table th,
+.qbr-table td {
+    text-align: center;
+}
+
+.qbr-table th:first-child,
+.qbr-table td:first-child {
+    text-align: left;
+    white-space: nowrap;
+}
+
+.qbr-table td.qbr-empty {
+    color: #999;
+}
+
+.qbr-country-name {
+    color: #666;
+    font-weight: 400;
+    font-size: 0.9rem;
+}
+
+.qbr-note {
+    margin: 0 0 1rem;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+.qbr-note--hint {
+    margin: 1rem 0 0;
+    font-style: italic;
+}
+
 @media (max-width: 768px) {
     .container {
         padding: 1rem;

@@ -35,3 +35,4 @@ Temporary Items
 
 # Log files
 *.log
+.gstack/
