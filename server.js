@@ -5,7 +5,11 @@ const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+if (!process.env.APP_PASSWORD) {
+  console.error('FATAL: APP_PASSWORD environment variable is required.');
+  process.exit(1);
+}
+const PASSWORD = process.env.APP_PASSWORD;
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
 app.use(express.json());
@@ -253,6 +257,10 @@ app.get('/api/batch-badges-stream', (req, res) => {
     if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
     if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
 
+    const USERNAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
+    const validUsernames = usernames.filter(u => u.length <= 100 && USERNAME_PATTERN.test(u));
+    if (validUsernames.length === 0) return res.status(400).json({ error: 'No valid usernames provided' });
+
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -265,7 +273,7 @@ app.get('/api/batch-badges-stream', (req, res) => {
     const limit = createConcurrencyLimiter(10);
     let completed = 0;
 
-    usernames.forEach((username) => {
+    validUsernames.forEach((username) => {
         limit(async () => {
             if (closed) return;
             try {
@@ -278,11 +286,11 @@ app.get('/api/batch-badges-stream', (req, res) => {
                 }
             } catch (err) {
                 if (!closed) {
-                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: err.message })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: 'Failed to fetch badges for this user.' })}\n\n`);
                 }
             }
             completed++;
-            if (completed === usernames.length && !closed) {
+            if (completed === validUsernames.length && !closed) {
                 res.write('event: done\ndata: {}\n\n');
                 res.end();
             }
@@ -306,6 +314,9 @@ app.post('/api/profiles', (req, res) => {
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
+    }
+    if (country.trim().length > 100) {
+        return res.status(400).json({ error: 'Country name too long (max 100 characters).' });
     }
     if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
         return res.status(400).json({ error: 'Invalid Credly profile URL.' });
