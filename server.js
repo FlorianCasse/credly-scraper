@@ -2,11 +2,26 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
+
+// Pre-hash the expected password once at startup so we can compare equal-length buffers
+const PASSWORD_HASH = crypto.createHash('sha256').update(String(PASSWORD)).digest();
+
+// Constant-time password comparison to prevent timing side-channel attacks.
+function passwordMatches(candidate) {
+    if (typeof candidate !== 'string') return false;
+    const candidateHash = crypto.createHash('sha256').update(candidate).digest();
+    try {
+        return crypto.timingSafeEqual(candidateHash, PASSWORD_HASH);
+    } catch {
+        return false;
+    }
+}
 
 app.use(express.json());
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
@@ -301,7 +316,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -335,7 +350,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!passwordMatches(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
