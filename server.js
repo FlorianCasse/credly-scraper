@@ -2,13 +2,26 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD) {
+  console.error('FATAL: APP_PASSWORD environment variable is required');
+  process.exit(1);
+}
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+function safeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+app.use(express.json({ limit: '16kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
@@ -301,7 +314,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!safeCompare(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -335,7 +348,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!safeCompare(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
@@ -414,7 +427,7 @@ async function prewarmCache() {
     console.log('[prewarm] Cache warming complete');
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
     console.log(`Server running on http://localhost:${PORT}`);
     prewarmCache();
 });
