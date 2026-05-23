@@ -2,14 +2,55 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+// Refuse to start without an explicit, operator-supplied password. Prevents
+// shipping a known default into production.
+if (!PASSWORD || PASSWORD.length < 12) {
+    console.error('FATAL: APP_PASSWORD environment variable must be set and at least 12 characters.');
+    process.exit(1);
+}
+const PASSWORD_HASH = crypto.createHash('sha256').update(PASSWORD).digest();
+
+function isPasswordValid(candidate) {
+    if (typeof candidate !== 'string') return false;
+    const candidateHash = crypto.createHash('sha256').update(candidate).digest();
+    return crypto.timingSafeEqual(candidateHash, PASSWORD_HASH);
+}
+
+app.disable('x-powered-by');
+app.use(helmet({
+    contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", 'https://cdnjs.cloudflare.com'],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'img-src': ["'self'", 'data:', 'blob:', 'https://images.credly.com', 'https://www.credly.com'],
+            'connect-src': ["'self'"],
+            'frame-ancestors': ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false,
+}));
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+
+// Rate limit profile mutation endpoints to slow brute-force attempts.
+const profileWriteLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -89,6 +130,10 @@ app.get('/api/credly', (req, res) => {
 
     let parsed;
     try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    // SSRF defence: explicit https-only + host allowlist (rejects file:, http:, gopher:, etc.)
+    if (parsed.protocol !== 'https:') {
+        return res.status(403).json({ error: 'Only https URLs are allowed' });
+    }
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
     }
@@ -298,10 +343,10 @@ app.get('/api/profiles', (req, res) => {
 });
 
 // Add a profile
-app.post('/api/profiles', (req, res) => {
+app.post('/api/profiles', profileWriteLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!isPasswordValid(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -332,10 +377,10 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // Remove a profile
-app.delete('/api/profiles', (req, res) => {
+app.delete('/api/profiles', profileWriteLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!isPasswordValid(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
