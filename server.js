@@ -9,7 +9,30 @@ const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
 app.use(express.json());
-app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+
+// Block sensitive files from being served
+app.use((req, res, next) => {
+  const blocked = ['/server.js', '/package.json', '/package-lock.json', '/data', '/credly_badge_downloader.sh', '/.github', '/.env'];
+  if (blocked.some(p => req.path.startsWith(p))) {
+    return res.status(404).send('Not found');
+  }
+  next();
+});
+
+app.use(express.static(__dirname, {
+  extensions: ['html', 'css', 'js'],
+  index: 'index.html',
+  dotfiles: 'deny'
+}));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -33,6 +56,11 @@ function writeProfiles(data) {
 function normalizeUrl(url) {
     const match = url.trim().match(/credly\.com\/users\/([^\/\s#?]+)/i);
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
+}
+
+// Validate username to prevent SSRF/injection via URL construction
+function isValidUsername(username) {
+    return /^[a-zA-Z0-9._-]{1,100}$/.test(username);
 }
 
 // --- In-Memory Cache ---
@@ -69,7 +97,23 @@ function getCached(key) {
     return entry;
 }
 
+const ALLOWED_CACHE_CONTENT_TYPES = [
+    'application/json',
+    'image/png',
+    'image/svg+xml',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+];
+
+function isAllowedContentType(contentType) {
+    if (!contentType) return false;
+    return ALLOWED_CACHE_CONTENT_TYPES.some(t => contentType.startsWith(t));
+}
+
 function setCache(key, buffer, contentType) {
+    // Only cache expected content types
+    if (!isAllowedContentType(contentType)) return;
     const existing = cache.get(key);
     if (existing) currentCacheBytes -= existing.size;
     const size = buffer.length;
@@ -192,6 +236,7 @@ function fetchUrl(url) {
 }
 
 async function fetchAllBadges(username) {
+    if (!isValidUsername(username)) throw new Error(`Invalid username: ${username}`);
     const allBadges = [];
     let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
     while (nextUrl) {
@@ -204,6 +249,7 @@ async function fetchAllBadges(username) {
 }
 
 async function fetchDisplayName(username) {
+    if (!isValidUsername(username)) return username;
     try {
         const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
         const user = data.data;
