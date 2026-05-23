@@ -8,7 +8,8 @@ const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+// Cap JSON body size to prevent memory-exhaustion DoS.
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
@@ -237,7 +238,9 @@ app.post('/api/batch-badges', async (req, res) => {
 
     const response = results.map((r, i) => {
         if (r.status === 'fulfilled') return r.value;
-        return { username: usernames[i], displayName: usernames[i], badges: [], error: r.reason?.message };
+        // Do not leak raw upstream error messages to clients.
+        if (r.reason?.message) console.warn(`[batch-badges] ${usernames[i]}: ${r.reason.message}`);
+        return { username: usernames[i], displayName: usernames[i], badges: [], error: 'Fetch failed' };
     });
 
     res.json(response);
@@ -277,8 +280,10 @@ app.get('/api/batch-badges-stream', (req, res) => {
                     res.write(`data: ${JSON.stringify({ username, displayName, badges })}\n\n`);
                 }
             } catch (err) {
+                // Log internal details server-side, send generic message to client.
+                console.warn(`[batch-badges-stream] ${username}: ${err.message}`);
                 if (!closed) {
-                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: err.message })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ username, displayName: username, badges: [], error: 'Fetch failed' })}\n\n`);
                 }
             }
             completed++;
@@ -306,6 +311,9 @@ app.post('/api/profiles', (req, res) => {
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
+    }
+    if (country.length > 100) {
+        return res.status(400).json({ error: 'Country name too long.' });
     }
     if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
         return res.status(400).json({ error: 'Invalid Credly profile URL.' });
