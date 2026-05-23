@@ -356,27 +356,47 @@ function createBadgeCard(badge, canvas, index) {
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
+    const imageUrl = badge.image_url;
 
-    card.innerHTML = `
-        <div class="badge-image-container">
-            ${canvas ? '' : '<div class="spinner"></div>'}
-        </div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            <div class="badge-meta">Issued: ${issuedAt}</div>
-        </div>
-        <div class="badge-actions">
-            <button class="download-btn" data-index="${index}">Download PNG</button>
-            <button class="view-original-btn" data-url="${badge.image_url}">View Original</button>
-        </div>
-    `;
-
-    if (canvas) {
-        card.querySelector('.badge-image-container').appendChild(canvas);
+    const imgContainer = document.createElement('div');
+    imgContainer.className = 'badge-image-container';
+    if (!canvas) {
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner';
+        imgContainer.appendChild(spinner);
+    } else {
+        imgContainer.appendChild(canvas);
     }
+    card.appendChild(imgContainer);
 
-    card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    const info = document.createElement('div');
+    info.className = 'badge-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'badge-name';
+    nameEl.textContent = badgeName;
+    info.appendChild(nameEl);
+    const metaEl = document.createElement('div');
+    metaEl.className = 'badge-meta';
+    metaEl.textContent = `Issued: ${issuedAt}`;
+    info.appendChild(metaEl);
+    card.appendChild(info);
+
+    const actions = document.createElement('div');
+    actions.className = 'badge-actions';
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'download-btn';
+    dlBtn.dataset.index = String(index);
+    dlBtn.textContent = 'Download PNG';
+    dlBtn.addEventListener('click', () => handleDownloadSingle(index, badgeName));
+    actions.appendChild(dlBtn);
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'view-original-btn';
+    viewBtn.textContent = 'View Original';
+    viewBtn.addEventListener('click', () => {
+        if (imageUrl) window.open(imageUrl, '_blank', 'noopener,noreferrer');
+    });
+    actions.appendChild(viewBtn);
+    card.appendChild(actions);
 
     return card;
 }
@@ -445,29 +465,50 @@ function createCommonCard(badge, globalIndex, holders) {
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuer = badge.badge_template?.issuer_org_name || '';
     const holderCount = holders.size;
-    const holdersHtml = Array.from(holders)
-        .map(h => `<span class="holder-tag">${userDisplayNames[h] || h}</span>`)
-        .join('');
 
-    card.innerHTML = `
-        <div class="badge-image-container"></div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            ${issuer ? `<div class="badge-meta">${issuer}</div>` : ''}
-            <div class="badge-meta holders-count">${holderCount} ${holderCount === 1 ? 'person' : 'people'}</div>
-        </div>
-        <div class="holders-list">${holdersHtml}</div>
-    `;
+    const imgContainer = document.createElement('div');
+    imgContainer.className = 'badge-image-container';
+    card.appendChild(imgContainer);
+
+    const info = document.createElement('div');
+    info.className = 'badge-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'badge-name';
+    nameEl.textContent = badgeName;
+    info.appendChild(nameEl);
+    if (issuer) {
+        const issuerEl = document.createElement('div');
+        issuerEl.className = 'badge-meta';
+        issuerEl.textContent = issuer;
+        info.appendChild(issuerEl);
+    }
+    const countEl = document.createElement('div');
+    countEl.className = 'badge-meta holders-count';
+    countEl.textContent = `${holderCount} ${holderCount === 1 ? 'person' : 'people'}`;
+    info.appendChild(countEl);
+    card.appendChild(info);
+
+    const holdersList = document.createElement('div');
+    holdersList.className = 'holders-list';
+    for (const h of holders) {
+        const tag = document.createElement('span');
+        tag.className = 'holder-tag';
+        tag.textContent = userDisplayNames[h] || h;
+        holdersList.appendChild(tag);
+    }
+    card.appendChild(holdersList);
 
     const canvas = processedBadges[globalIndex];
-    const container = card.querySelector('.badge-image-container');
     if (canvas) {
         const img = document.createElement('img');
         img.src = canvas.toDataURL('image/png');
         img.style.cssText = 'max-width:100%;max-height:100%;display:block;';
-        container.appendChild(img);
+        imgContainer.appendChild(img);
     } else {
-        container.innerHTML = '<div style="color:#dc3545;font-size:0.875rem;">Image not available</div>';
+        const placeholder = document.createElement('div');
+        placeholder.style.cssText = 'color:#dc3545;font-size:0.875rem;';
+        placeholder.textContent = 'Image not available';
+        imgContainer.appendChild(placeholder);
     }
 
     return card;
@@ -496,17 +537,29 @@ function renderByCertification() {
 
     const table = document.createElement('table');
     table.className = 'certification-table';
-    table.innerHTML = `
-        <thead>
-            <tr><th>Certification</th><th>Holders</th></tr>
-        </thead>
-        <tbody>
-            ${sorted.map(({ badge, holders }) => {
-                const name = badge.badge_template?.name || badge.name || 'Unknown';
-                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
-            }).join('')}
-        </tbody>
-    `;
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const label of ['Certification', 'Holders']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const { badge, holders } of sorted) {
+        const name = badge.badge_template?.name || badge.name || 'Unknown';
+        const row = document.createElement('tr');
+        const nameCell = document.createElement('td');
+        nameCell.textContent = name;
+        const countCell = document.createElement('td');
+        countCell.textContent = String(holders.size);
+        row.appendChild(nameCell);
+        row.appendChild(countCell);
+        tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
     certificationGrid.appendChild(table);
 }
 
@@ -1088,12 +1141,17 @@ async function initQuickSelect() {
         const label = document.createElement('label');
         label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
         label.dataset.country = country;
-        label.innerHTML = `
-            <input type="checkbox">
-            <span>${country}</span>
-            <span class="country-pill-count">(${urls.length})</span>
-        `;
-        label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = country;
+        const countSpan = document.createElement('span');
+        countSpan.className = 'country-pill-count';
+        countSpan.textContent = `(${urls.length})`;
+        label.appendChild(checkbox);
+        label.appendChild(nameSpan);
+        label.appendChild(countSpan);
+        checkbox.addEventListener('change', updateTextareaFromCheckboxes);
         pills.appendChild(label);
     }
 
@@ -1125,13 +1183,22 @@ async function initQuickSelect() {
             const username = url.match(/\/users\/([^\/\s#?]+)/i)?.[1] || url;
             const tag = document.createElement('span');
             tag.className = 'custom-profile-tag';
-            tag.innerHTML = `
-                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
-                <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
-            `;
-            tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
+            const textSpan = document.createElement('span');
+            textSpan.className = 'custom-profile-tag-text';
+            textSpan.textContent = username + ' ';
+            const small = document.createElement('small');
+            small.textContent = `(${country})`;
+            textSpan.appendChild(small);
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'custom-profile-remove';
+            removeBtn.title = 'Remove this profile';
+            removeBtn.textContent = '×';
+            removeBtn.addEventListener('click', () => {
                 removeCustomProfile(country, url);
             });
+            tag.appendChild(textSpan);
+            tag.appendChild(removeBtn);
             list.appendChild(tag);
         }
         listContainer.appendChild(list);
