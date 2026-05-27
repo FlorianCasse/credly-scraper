@@ -4,6 +4,11 @@ credly_badges_*
 # Node
 node_modules/
 
+# Environment variables
+.env
+.env.*
+.env.local
+
 # macOS
 .DS_Store
 .AppleDouble

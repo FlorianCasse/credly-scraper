@@ -2,13 +2,18 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD) {
+    console.error('FATAL: APP_PASSWORD environment variable is required');
+    process.exit(1);
+}
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
@@ -35,9 +40,23 @@ function normalizeUrl(url) {
     return match ? match[1].toLowerCase() : url.trim().toLowerCase();
 }
 
+// Timing-safe password comparison
+function verifyPassword(input) {
+    if (typeof input !== 'string') return false;
+    const inputBuf = Buffer.from(input);
+    const passwordBuf = Buffer.from(PASSWORD);
+    if (inputBuf.length !== passwordBuf.length) {
+        // Still do a comparison to avoid leaking length info via timing
+        crypto.timingSafeEqual(passwordBuf, passwordBuf);
+        return false;
+    }
+    return crypto.timingSafeEqual(inputBuf, passwordBuf);
+}
+
 // --- In-Memory Cache ---
 const cache = new Map();
 const MAX_CACHE_BYTES = 100 * 1024 * 1024; // 100 MB
+const MAX_ENTRY_BYTES = 10 * 1024 * 1024;  // 10 MB per entry
 const TTL_JSON = 60 * 60 * 1000;           // 1 hour
 const TTL_IMAGE = 24 * 60 * 60 * 1000;     // 24 hours
 let currentCacheBytes = 0;
@@ -70,6 +89,7 @@ function getCached(key) {
 }
 
 function setCache(key, buffer, contentType) {
+    if (buffer.length > MAX_ENTRY_BYTES) return; // Skip caching oversized entries
     const existing = cache.get(key);
     if (existing) currentCacheBytes -= existing.size;
     const size = buffer.length;
@@ -91,6 +111,13 @@ app.get('/api/credly', (req, res) => {
     try { parsed = new URL(credlyUrl); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
     if (!ALLOWED_CREDLY_HOSTS.includes(parsed.hostname)) {
         return res.status(403).json({ error: 'URL must be from credly.com' });
+    }
+    // SSRF protection: enforce HTTPS and default port only
+    if (parsed.protocol !== 'https:') {
+        return res.status(403).json({ error: 'Only HTTPS URLs are allowed' });
+    }
+    if (parsed.port && parsed.port !== '443') {
+        return res.status(403).json({ error: 'Non-standard ports are not allowed' });
     }
 
     const cacheKey = credlyUrl;
@@ -191,7 +218,13 @@ function fetchUrl(url) {
     });
 }
 
+// Username format validation
+function isValidUsername(username) {
+    return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(username);
+}
+
 async function fetchAllBadges(username) {
+    if (!isValidUsername(username)) throw new Error('Invalid username format');
     const allBadges = [];
     let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
     while (nextUrl) {
@@ -204,6 +237,7 @@ async function fetchAllBadges(username) {
 }
 
 async function fetchDisplayName(username) {
+    if (!isValidUsername(username)) return username;
     try {
         const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
         const user = data.data;
@@ -301,10 +335,17 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!verifyPassword(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
-    if (!country || typeof country !== 'string' || !country.trim()) {
+    // Input length validation
+    if (typeof country !== 'string' || country.length > 100) {
+        return res.status(400).json({ error: 'Country must be a string of 100 characters or less.' });
+    }
+    if (typeof url !== 'string' || url.length > 500) {
+        return res.status(400).json({ error: 'URL must be a string of 500 characters or less.' });
+    }
+    if (!country || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
     }
     if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
@@ -335,7 +376,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (!verifyPassword(password)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
