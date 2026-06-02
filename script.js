@@ -142,10 +142,16 @@ const QBR_COUNTRIES = [
 // Badge classifier for the QBR Report tab. Regex defaults below are tuned against
 // observed Broadcom/VMware badge names — refine in the "By Certification" tab if a
 // new badge family appears.
+// Counting rules (see computeQBRMatrix):
+//   - default: SUM of distinct matching certifications across all holders in the
+//     country (a person with 4 distinct VCAPs counts as 4).
+//   - holderOnce: true: count each person at most once (distinct holders), used
+//     for #Knights where the KPI is "how many people", not "how many badges".
 const QBR_CATEGORIES = [
     {
         key: 'knights',
         label: '#Knights',
+        holderOnce: true,
         // No "Knight" badges in Credly today — keeping a permissive match so future
         // ones (VCF Knight, vRealize Knight, etc.) are picked up automatically.
         test: name => /knight/i.test(name),
@@ -153,16 +159,18 @@ const QBR_CATEGORIES = [
     {
         key: 'vcf_vcp_v9',
         label: '#VCF VCP v9 (Implement/Architect)',
-        // VCF VCP v9 = "VMware Certified Professional - VMware Cloud Foundation Administrator|Architect"
-        // ending exactly there (newer "v9" line); legacy year-suffixed variants like
-        // "Administrator 2024" are excluded.
-        test: name => /Certified Professional\s*[-–]\s*VMware Cloud Foundation (Administrator|Architect)\s*$/i.test(name),
+        // VCF VCP v9 = the 5 canonical "VMware Certified Professional" exams (no year
+        // suffix): Cloud/vSphere Foundation Administrator|Architect|Support. The
+        // trailing `$` excludes legacy year-suffixed variants like "Administrator 2024".
+        test: name => /Certified Professional\s*[-–]\s*VMware (Cloud|vSphere) Foundation (Administrator|Architect|Support)\s*$/i.test(name),
     },
     {
         key: 'vcf_spec_vcap',
         label: '#VCF Specializations v9 (VCAP)',
-        // VCAP-level VCF specializations: "VMware Certified Advanced Professional - VMware Cloud Foundation <Track>"
-        test: name => /Certified Advanced Professional\s*[-–]\s*VMware Cloud Foundation/i.test(name),
+        // VCAP-level VCF specializations: the 5 canonical "VMware Certified Advanced
+        // Professional - VMware Cloud Foundation <Track>" exams. The trailing `$`
+        // excludes legacy variants (e.g. "Cloud Management and Automation ... 2023").
+        test: name => /Certified Advanced Professional\s*[-–]\s*VMware Cloud Foundation (Automation|Storage|Operations|Networking|VKS)\s*$/i.test(name),
     },
 ];
 
@@ -528,16 +536,22 @@ async function buildUsernameToCountry() {
     return map;
 }
 
-// Compute the QBR matrix: { [country]: { profilesFetched, [categoryKey]: holderCount } }
+// Compute the QBR matrix: { [country]: { profilesFetched: Set, [categoryKey]: number } }
+//
+// Default categories count the SUM of distinct matching certifications across all
+// holders (someone with 4 distinct VCAPs adds 4). Categories flagged `holderOnce`
+// count each person at most once (distinct holders) — e.g. #Knights.
 async function computeQBRMatrix() {
     const usernameToCountry = await buildUsernameToCountry();
 
-    // For each category, collect distinct usernames per country
-    const result = {};
+    // Per country, per category: Map<username, Set<distinct badge name>>
+    const perPerson = {};
+    const profilesFetched = {};
     for (const { name } of QBR_COUNTRIES) {
-        result[name] = { profilesFetched: new Set() };
+        profilesFetched[name] = new Set();
+        perPerson[name] = {};
         for (const cat of QBR_CATEGORIES) {
-            result[name][cat.key] = new Set();
+            perPerson[name][cat.key] = new Map();
         }
     }
 
@@ -545,13 +559,31 @@ async function computeQBRMatrix() {
         const username = badge._username;
         if (!username) continue;
         const country = usernameToCountry.get(username.toLowerCase()) || usernameToCountry.get(username);
-        if (!country || !result[country]) continue;
+        if (!country || !perPerson[country]) continue;
 
-        result[country].profilesFetched.add(username);
+        profilesFetched[country].add(username);
         const badgeName = badge.badge_template?.name || badge.name || '';
         for (const cat of QBR_CATEGORIES) {
             if (cat.test(badgeName)) {
-                result[country][cat.key].add(username);
+                const byUser = perPerson[country][cat.key];
+                if (!byUser.has(username)) byUser.set(username, new Set());
+                byUser.get(username).add(badgeName);
+            }
+        }
+    }
+
+    // Reduce per-person sets to a single count per category
+    const result = {};
+    for (const { name } of QBR_COUNTRIES) {
+        result[name] = { profilesFetched: profilesFetched[name] };
+        for (const cat of QBR_CATEGORIES) {
+            const byUser = perPerson[name][cat.key];
+            if (cat.holderOnce) {
+                result[name][cat.key] = byUser.size; // one per distinct holder
+            } else {
+                let total = 0;
+                for (const certs of byUser.values()) total += certs.size;
+                result[name][cat.key] = total; // distinct certs summed across holders
             }
         }
     }
@@ -569,8 +601,9 @@ async function renderQBRReport() {
 
     const note = document.createElement('p');
     note.className = 'qbr-note';
-    note.innerHTML = 'Counts are distinct profile holders per country, computed from the badges currently loaded. ' +
-        '"—" means no profiles have been ingested for that country yet.';
+    note.innerHTML = 'Counts are the sum of distinct certifications across all holders per country (a person with ' +
+        '4 distinct VCAPs counts as 4), computed from the badges currently loaded. <strong>#Knights</strong> is the ' +
+        'exception: it counts each person once. "—" means no profiles have been ingested for that country yet.';
     qbrGrid.appendChild(note);
 
     const table = document.createElement('table');
@@ -586,7 +619,7 @@ async function renderQBRReport() {
 
         const kpiCells = QBR_CATEGORIES.map(cat => {
             if (!hasProfiles) return '<td class="qbr-empty">—</td>';
-            return `<td>${row[cat.key].size}</td>`;
+            return `<td>${row[cat.key]}</td>`;
         }).join('');
 
         const fetchedCell = hasProfiles
@@ -617,7 +650,7 @@ async function exportQBRCSV() {
         const row = [cat.label];
         for (const { name } of QBR_COUNTRIES) {
             const hasProfiles = (allProfiles[name] || []).length > 0;
-            row.push(hasProfiles ? matrix[name][cat.key].size : '');
+            row.push(hasProfiles ? matrix[name][cat.key] : '');
         }
         rows.push(row);
     }
