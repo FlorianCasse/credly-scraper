@@ -116,8 +116,10 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/toine-eetgerink',
         'https://www.credly.com/users/vincent-jansen.29312768',
         'https://www.credly.com/users/vincent-van-vierzen',
+        'https://www.credly.com/users/artjom-cubleac.49c35287',
+        'https://www.credly.com/users/hendrik-ruis',
+        'https://www.credly.com/users/mattheus-van-der-wal',
         'https://www.credly.com/users/wesley-van-ede',
-        'https://www.credly.com/users/wesley-geelhoed',
     ],
 };
 
