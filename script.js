@@ -133,13 +133,10 @@ const PREDEFINED_PROFILES = {
 const QBR_COUNTRIES = [
     { code: 'BE', name: 'Belgium' },
     { code: 'DE', name: 'Germany' },
-    { code: 'DK', name: 'Denmark' },
     { code: 'FR', name: 'France' },
     { code: 'LU', name: 'Luxembourg' },
-    { code: 'NL', name: 'Netherlands' },
-    { code: 'NO', name: 'Norway' },
     { code: 'ND', name: 'Nordics' },
-    { code: 'SW', name: 'Sweden' },
+    { code: 'NL', name: 'Netherlands' },
 ];
 
 // Badge classifier for the QBR Report tab. Regex defaults below are tuned against
