@@ -123,6 +123,9 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/mattheus-van-der-wal',
         'https://www.credly.com/users/wesley-van-ede',
     ],
+    'Nordics': [
+        'https://www.credly.com/users/paul-john-mcconnon',
+    ],
 };
 
 // QBR (Broadcom Quarterly Business Review) matrix: country code -> display name in PREDEFINED_PROFILES / custom-profiles
@@ -135,6 +138,7 @@ const QBR_COUNTRIES = [
     { code: 'LU', name: 'Luxembourg' },
     { code: 'NL', name: 'Netherlands' },
     { code: 'NO', name: 'Norway' },
+    { code: 'ND', name: 'Nordics' },
     { code: 'SW', name: 'Sweden' },
 ];
 
