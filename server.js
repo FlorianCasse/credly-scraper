@@ -411,7 +411,7 @@ function getAllPredefinedUsernames() {
         const allUrls = [];
         // Hardcoded predefined profiles (mirror of script.js PREDEFINED_PROFILES)
         const predefined = {
-            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam'],
+            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam','steven-charrier','alaa-badaoui.c4e8b5c2','edouard-topin'],
             'Belgium': ['alexandre-francois.18d3df90','andy-ayite-zonor','igor-jemuce','jan-horrix','kevin-burgers','michael-van-de-gaer','michielpeene','stijnvermoesen','sven-cranshoff','wannes-de-boodt','yason-prufer'],
             'Luxembourg': ['amaury-sobaco.abfaee41','davy-stoffel','franki-sohmoe-kamte','miguel-brasseur.18fd467e','sestegra','valentin-collin.88f97edb'],
             'Germany': ['malte-wilhelm'],
