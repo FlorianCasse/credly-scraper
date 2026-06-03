@@ -99,6 +99,27 @@ header h1 {
     color: var(--primary-color);
 }
 
+.preset-pills {
+    margin-bottom: 1.25rem;
+}
+
+.preset-pill {
+    background-color: transparent;
+    color: var(--text-color);
+    font-family: inherit;
+}
+
+.preset-pill--active {
+    border-color: var(--primary-color);
+    background-color: var(--primary-color);
+    color: #fff;
+}
+
+.preset-pill--active:hover {
+    border-color: var(--primary-hover);
+    background-color: var(--primary-hover);
+}
+
 .country-pill input[type="checkbox"] {
     width: auto;
     margin: 0;
