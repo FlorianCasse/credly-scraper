@@ -62,8 +62,24 @@ Browser  →  Nginx (:8080)  →  Express.js (:3002)  →  Credly API / CDN
 git clone https://github.com/FlorianCasse/credly-scraper.git
 cd credly-scraper
 npm install
-APP_PASSWORD=yourpassword PORT=3002 npm start
+SITE_USER=credly SITE_PASSWORD=yourSitePass APP_PASSWORD=yourAdminPass PORT=3002 npm start
 ```
+
+### Access protection
+
+The **whole site** is gated behind HTTP Basic Auth — visitors get a browser
+login prompt before anything loads. Configure it with two env vars:
+
+- `SITE_USER` — username for the prompt (default `credly`)
+- `SITE_PASSWORD` — site-access password (default `changeme` — **change it**)
+
+This is separate from `APP_PASSWORD`, which additionally protects the
+add/remove-profile actions, so a logged-in viewer still can't edit the profile
+list without the second password.
+
+> Note: the GitHub Pages deployment (`.github/workflows/deploy.yml`) is static
+> hosting and cannot run this gate — only the self-hosted Express server is
+> protected.
 
 ---
 

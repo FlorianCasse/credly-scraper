@@ -2,13 +2,43 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const SITE_USER = process.env.SITE_USER || 'credly';
+const SITE_PASSWORD = process.env.SITE_PASSWORD || 'changeme';
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
 
 app.use(express.json());
+
+// --- Site-wide access gate (HTTP Basic Auth) ---
+// Protects every route (pages, assets, and /api/*) behind a single password.
+// Separate from APP_PASSWORD, which additionally gates profile add/remove.
+
+function safeEqual(a, b) {
+    const ab = Buffer.from(a);
+    const bb = Buffer.from(b);
+    return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+app.use((req, res, next) => {
+    const auth = req.headers.authorization || '';
+    const [scheme, encoded] = auth.split(' ');
+    if (scheme === 'Basic' && encoded) {
+        const decoded = Buffer.from(encoded, 'base64').toString();
+        const i = decoded.indexOf(':');
+        const user = decoded.slice(0, i);
+        const pass = decoded.slice(i + 1);
+        if (safeEqual(user, SITE_USER) && safeEqual(pass, SITE_PASSWORD)) {
+            return next();
+        }
+    }
+    res.set('WWW-Authenticate', 'Basic realm="Credly Scraper", charset="UTF-8"');
+    return res.status(401).send('Authentication required.');
+});
+
 app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
 
 // Serve index.html for root
