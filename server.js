@@ -4,12 +4,25 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 
+// Load secrets from a local .env file if present. .env is gitignored and never
+// committed, so no password ever lives in the (public) source code.
+try { process.loadEnvFile(path.join(__dirname, '.env')); } catch { /* no .env — rely on the real environment */ }
+
 const app = express();
 const PORT = process.env.PORT || 3002;
-const PASSWORD = process.env.APP_PASSWORD || 'certificationitq1!';
+const PASSWORD = process.env.APP_PASSWORD;
 const SITE_USER = process.env.SITE_USER || 'credly';
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'changeme';
+const SITE_PASSWORD = process.env.SITE_PASSWORD;
 const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
+
+// Fail fast if a required secret is missing — there are no insecure hardcoded
+// defaults to fall back on.
+for (const [name, value] of [['APP_PASSWORD', PASSWORD], ['SITE_PASSWORD', SITE_PASSWORD]]) {
+    if (!value) {
+        console.error(`Missing required env var ${name}. Set it in a .env file or the environment (see .env.example).`);
+        process.exit(1);
+    }
+}
 
 app.use(express.json());
 
@@ -398,7 +411,7 @@ function getAllPredefinedUsernames() {
         const allUrls = [];
         // Hardcoded predefined profiles (mirror of script.js PREDEFINED_PROFILES)
         const predefined = {
-            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam'],
+            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam','steven-charrier','alaa-badaoui.c4e8b5c2','edouard-topin'],
             'Belgium': ['alexandre-francois.18d3df90','andy-ayite-zonor','igor-jemuce','jan-horrix','kevin-burgers','michael-van-de-gaer','michielpeene','stijnvermoesen','sven-cranshoff','wannes-de-boodt','yason-prufer'],
             'Luxembourg': ['amaury-sobaco.abfaee41','davy-stoffel','franki-sohmoe-kamte','miguel-brasseur.18fd467e','sestegra','valentin-collin.88f97edb'],
             'Germany': ['malte-wilhelm'],

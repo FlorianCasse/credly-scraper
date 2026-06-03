@@ -4,6 +4,11 @@ credly_badges_*
 # Node
 node_modules/
 
+# Secrets / environment (never commit real passwords)
+.env
+.env.local
+.env.*.local
+
 # macOS
 .DS_Store
 .AppleDouble
