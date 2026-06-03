@@ -141,6 +141,7 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/artjom-cubleac.49c35287',
         'https://www.credly.com/users/hendrik-ruis',
         'https://www.credly.com/users/mattheus-van-der-wal',
+        'https://www.credly.com/users/richard-van-dantzig',
         'https://www.credly.com/users/wesley-van-ede',
     ],
     'Nordics': [
