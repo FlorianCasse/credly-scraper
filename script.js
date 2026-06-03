@@ -1128,12 +1128,65 @@ async function updateTextareaFromCheckboxes() {
     profileUrlInput.value = [...manualLines, ...countryLines].join('\n');
 }
 
+// Selection presets (groups of countries). `countries: null` means all countries.
+const SELECTION_PRESETS = [
+    { label: 'Tout ITQ', countries: null },
+    { label: 'Gallia', countries: ['France', 'Belgium', 'Luxembourg'] },
+];
+
 // Render country pill checkboxes from merged profiles
 async function initQuickSelect() {
     const container = document.getElementById('quick-select');
     if (!container) return;
     container.innerHTML = '';
 
+    const allProfiles = await getAllProfiles();
+
+    const getCountryCheckbox = (country) =>
+        document.querySelector(`.country-pill[data-country="${CSS.escape(country)}"] input[type="checkbox"]`);
+    const presetTargets = (countries) => (countries || Object.keys(allProfiles));
+
+    // --- Group presets (above the by-country selection) ---
+    const presetTitle = document.createElement('p');
+    presetTitle.className = 'quick-select-title';
+    presetTitle.textContent = 'Quick select by group';
+    container.appendChild(presetTitle);
+
+    const presetPills = document.createElement('div');
+    presetPills.className = 'country-pills preset-pills';
+    container.appendChild(presetPills);
+
+    function refreshPresetActiveStates() {
+        for (const pill of presetPills.querySelectorAll('.preset-pill')) {
+            const countries = JSON.parse(pill.dataset.countries);
+            const boxes = presetTargets(countries).map(getCountryCheckbox).filter(Boolean);
+            const active = boxes.length > 0 && boxes.every(b => b.checked);
+            pill.classList.toggle('preset-pill--active', active);
+        }
+    }
+
+    // Combined handler for country checkbox changes: sync textarea + preset states
+    const onCountryChange = () => {
+        updateTextareaFromCheckboxes();
+        refreshPresetActiveStates();
+    };
+
+    for (const preset of SELECTION_PRESETS) {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'country-pill preset-pill';
+        pill.dataset.countries = JSON.stringify(preset.countries);
+        pill.textContent = preset.label;
+        pill.addEventListener('click', () => {
+            const boxes = presetTargets(preset.countries).map(getCountryCheckbox).filter(Boolean);
+            const allChecked = boxes.length > 0 && boxes.every(b => b.checked);
+            boxes.forEach(b => { b.checked = !allChecked; });
+            onCountryChange();
+        });
+        presetPills.appendChild(pill);
+    }
+
+    // --- By-country selection ---
     const title = document.createElement('p');
     title.className = 'quick-select-title';
     title.textContent = 'Quick select by country';
@@ -1143,7 +1196,6 @@ async function initQuickSelect() {
     pills.className = 'country-pills';
     container.appendChild(pills);
 
-    const allProfiles = await getAllProfiles();
     for (const [country, urls] of Object.entries(allProfiles)) {
         const label = document.createElement('label');
         label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
@@ -1153,212 +1205,11 @@ async function initQuickSelect() {
             <span>${country}</span>
             <span class="country-pill-count">(${urls.length})</span>
         `;
-        label.querySelector('input').addEventListener('change', updateTextareaFromCheckboxes);
+        label.querySelector('input').addEventListener('change', onCountryChange);
         pills.appendChild(label);
     }
 
-    // "Add Profile" button
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'add-profile-btn';
-    addBtn.innerHTML = '<span class="plus-icon">+</span> Add Profile';
-    addBtn.addEventListener('click', openAddProfileModal);
-    pills.appendChild(addBtn);
-
-    // Render custom profiles list (removable)
-    const custom = cachedCustomProfiles || {};
-    const customEntries = Object.entries(custom).flatMap(([country, urls]) =>
-        urls.map(url => ({ country, url }))
-    );
-    if (customEntries.length > 0) {
-        const listContainer = document.createElement('div');
-        listContainer.className = 'custom-profiles-list';
-
-        const listTitle = document.createElement('p');
-        listTitle.className = 'quick-select-title';
-        listTitle.textContent = 'Your added profiles';
-        listContainer.appendChild(listTitle);
-
-        const list = document.createElement('div');
-        list.className = 'custom-profiles-tags';
-        for (const { country, url } of customEntries) {
-            const username = url.match(/\/users\/([^\/\s#?]+)/i)?.[1] || url;
-            const tag = document.createElement('span');
-            tag.className = 'custom-profile-tag';
-            tag.innerHTML = `
-                <span class="custom-profile-tag-text">${username} <small>(${country})</small></span>
-                <button type="button" class="custom-profile-remove" title="Remove this profile">&times;</button>
-            `;
-            tag.querySelector('.custom-profile-remove').addEventListener('click', () => {
-                removeCustomProfile(country, url);
-            });
-            list.appendChild(tag);
-        }
-        listContainer.appendChild(list);
-        container.appendChild(listContainer);
-    }
-}
-
-// Remove a custom profile
-async function removeCustomProfile(country, url) {
-    const password = sessionPassword || prompt('Enter the password to remove a profile:');
-    if (!password) return;
-
-    try {
-        const res = await fetch('/api/profiles', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password, country, url }),
-        });
-        if (res.status === 401) {
-            sessionPassword = null;
-            alert('Incorrect password.');
-            return;
-        }
-        if (!res.ok) { alert('Failed to remove profile.'); return; }
-        sessionPassword = password;
-    } catch {
-        alert('Network error.');
-        return;
-    }
-
-    await initQuickSelect();
-    await updateTextareaFromCheckboxes();
-}
-
-// Password session cache (only lives in memory, never persisted)
-let sessionPassword = null;
-
-// Modal logic
-async function openAddProfileModal() {
-    const modal = document.getElementById('add-profile-modal');
-    const countrySelect = document.getElementById('modal-country');
-    const newCountryGroup = document.getElementById('new-country-group');
-    const newCountryInput = document.getElementById('modal-new-country');
-    const modalError = document.getElementById('modal-error');
-    const profileUrlModalInput = document.getElementById('modal-profile-url');
-
-    // Reset form
-    profileUrlModalInput.value = '';
-    newCountryInput.value = '';
-    modalError.style.display = 'none';
-    newCountryGroup.style.display = 'none';
-
-    // Populate country dropdown
-    const allProfiles = await getAllProfiles();
-    countrySelect.innerHTML = '<option value="" disabled selected>Select a country...</option>';
-    for (const country of Object.keys(allProfiles).sort()) {
-        const opt = document.createElement('option');
-        opt.value = country;
-        opt.textContent = country;
-        countrySelect.appendChild(opt);
-    }
-    const newOpt = document.createElement('option');
-    newOpt.value = '__new__';
-    newOpt.textContent = '+ Add a new country...';
-    countrySelect.appendChild(newOpt);
-
-    modal.showModal();
-}
-
-function initModal() {
-    const modal = document.getElementById('add-profile-modal');
-    const form = document.getElementById('add-profile-form');
-    const countrySelect = document.getElementById('modal-country');
-    const newCountryGroup = document.getElementById('new-country-group');
-    const newCountryInput = document.getElementById('modal-new-country');
-    const cancelBtn = document.getElementById('modal-cancel-btn');
-    const modalError = document.getElementById('modal-error');
-
-    // Show/hide new country input
-    countrySelect.addEventListener('change', () => {
-        const isNew = countrySelect.value === '__new__';
-        newCountryGroup.style.display = isNew ? 'block' : 'none';
-        newCountryInput.required = isNew;
-    });
-
-    // Cancel
-    cancelBtn.addEventListener('click', () => modal.close());
-
-    // Close on backdrop click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.close();
-    });
-
-    // Submit
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const url = document.getElementById('modal-profile-url').value.trim();
-        const countryValue = countrySelect.value;
-        const newCountry = newCountryInput.value.trim();
-
-        // Validate URL
-        if (!url.match(/credly\.com\/users\/[^\/\s]+/i)) {
-            modalError.textContent = 'Please enter a valid Credly profile URL (e.g. https://www.credly.com/users/username)';
-            modalError.style.display = 'block';
-            return;
-        }
-
-        // Determine country
-        let country;
-        if (countryValue === '__new__') {
-            if (!newCountry) {
-                modalError.textContent = 'Please enter a country name.';
-                modalError.style.display = 'block';
-                return;
-            }
-            country = newCountry;
-        } else {
-            country = countryValue;
-        }
-
-        // Check for duplicate against full set (predefined + custom)
-        const allProfiles = await getAllProfiles();
-        const norm = normalizeProfileUrl(url);
-        for (const [c, urls] of Object.entries(allProfiles)) {
-            if (urls.some(u => normalizeProfileUrl(u) === norm)) {
-                modalError.textContent = `This profile already exists under "${c}".`;
-                modalError.style.display = 'block';
-                return;
-            }
-        }
-
-        // Ask for password if not yet cached
-        const password = sessionPassword || prompt('Enter the password to add a profile:');
-        if (!password) return;
-
-        const fullUrl = url.match(/^https?:\/\//) ? url : `https://www.credly.com/users/${url}`;
-
-        try {
-            const res = await fetch('/api/profiles', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password, country, url: fullUrl }),
-            });
-
-            if (res.status === 401) {
-                sessionPassword = null;
-                modalError.textContent = 'Incorrect password.';
-                modalError.style.display = 'block';
-                return;
-            }
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                modalError.textContent = data.error || 'Failed to add profile.';
-                modalError.style.display = 'block';
-                return;
-            }
-
-            sessionPassword = password;
-        } catch {
-            modalError.textContent = 'Network error. Is the server running?';
-            modalError.style.display = 'block';
-            return;
-        }
-
-        modal.close();
-        await initQuickSelect();
-    });
+    refreshPresetActiveStates();
 }
 
 // Ctrl+Enter (or Cmd+Enter on Mac) triggers fetch from the textarea
@@ -1368,6 +1219,5 @@ profileUrlInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Initialise quick-select checkboxes and modal on page load
+// Initialise quick-select checkboxes on page load
 initQuickSelect();
-initModal();
