@@ -64,6 +64,7 @@ const PREDEFINED_PROFILES = {
         'https://www.credly.com/users/steven-charrier',
         'https://www.credly.com/users/alaa-badaoui.c4e8b5c2',
         'https://www.credly.com/users/edouard-topin',
+        'https://www.credly.com/users/olivier-hamon-29',
     ],
     'Belgium': [
         'https://www.credly.com/users/alexandre-francois.18d3df90',
