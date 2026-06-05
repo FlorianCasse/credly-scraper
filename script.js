@@ -188,11 +188,25 @@ const QBR_CATEGORIES = [
         test: name => /Certified Professional\s*[-–]\s*VMware (Cloud|vSphere) Foundation (Administrator|Architect|Support)\s*$/i.test(name),
     },
     {
+        key: 'vcp_admin_arch_holders',
+        label: '#Individus VCP Admin/Architect (≥1)',
+        holderOnce: true, // compte chaque personne une fois (au moins un badge)
+        // VCP Administrator ou Architect uniquement (Support exclu), v9 (pas de suffixe d'année).
+        test: name => /Certified Professional\s*[-–]\s*VMware (Cloud|vSphere) Foundation (Administrator|Architect)\s*$/i.test(name),
+    },
+    {
         key: 'vcf_spec_vcap',
         label: '#VCF Specializations v9 (VCAP)',
         // VCAP-level VCF specializations: the 5 canonical "VMware Certified Advanced
         // Professional - VMware Cloud Foundation <Track>" exams. The trailing `$`
         // excludes legacy variants (e.g. "Cloud Management and Automation ... 2023").
+        test: name => /Certified Advanced Professional\s*[-–]\s*VMware Cloud Foundation (Automation|Storage|Operations|Networking|VKS)\s*$/i.test(name),
+    },
+    {
+        key: 'vcap_v9_holders',
+        label: '#Individus VCAP v9 (≥1)',
+        holderOnce: true, // compte chaque personne une fois (au moins un badge)
+        // Même périmètre VCAP v9 que vcf_spec_vcap, mais compté par personne.
         test: name => /Certified Advanced Professional\s*[-–]\s*VMware Cloud Foundation (Automation|Storage|Operations|Networking|VKS)\s*$/i.test(name),
     },
 ];
@@ -625,8 +639,9 @@ async function renderQBRReport() {
     const note = document.createElement('p');
     note.className = 'qbr-note';
     note.innerHTML = 'Counts are the sum of distinct certifications across all holders per country (a person with ' +
-        '4 distinct VCAPs counts as 4), computed from the badges currently loaded. <strong>#Knights</strong> is the ' +
-        'exception: it counts each person once. "—" means no profiles have been ingested for that country yet.';
+        '4 distinct VCAPs counts as 4), computed from the badges currently loaded. <strong>#Knights</strong> and the ' +
+        '<strong>#Individus …</strong> columns are the exception: they count each person once (holders with at least ' +
+        'one matching badge). "—" means no profiles have been ingested for that country yet.';
     qbrGrid.appendChild(note);
 
     const table = document.createElement('table');
