@@ -407,26 +407,52 @@ function createBadgeCard(badge, canvas, index) {
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
 
-    card.innerHTML = `
-        <div class="badge-image-container">
-            ${canvas ? '' : '<div class="spinner"></div>'}
-        </div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            <div class="badge-meta">Issued: ${issuedAt}</div>
-        </div>
-        <div class="badge-actions">
-            <button class="download-btn" data-index="${index}">Download PNG</button>
-            <button class="view-original-btn" data-url="${badge.image_url}">View Original</button>
-        </div>
-    `;
+    const imageContainer = document.createElement('div');
+    imageContainer.className = 'badge-image-container';
+    if (!canvas) {
+        const spinnerEl = document.createElement('div');
+        spinnerEl.className = 'spinner';
+        imageContainer.appendChild(spinnerEl);
+    }
+    card.appendChild(imageContainer);
+
+    const info = document.createElement('div');
+    info.className = 'badge-info';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'badge-name';
+    nameDiv.textContent = badgeName;
+    info.appendChild(nameDiv);
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'badge-meta';
+    metaDiv.textContent = `Issued: ${issuedAt}`;
+    info.appendChild(metaDiv);
+    card.appendChild(info);
+
+    const actions = document.createElement('div');
+    actions.className = 'badge-actions';
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'download-btn';
+    dlBtn.dataset.index = String(index);
+    dlBtn.textContent = 'Download PNG';
+    actions.appendChild(dlBtn);
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'view-original-btn';
+    viewBtn.textContent = 'View Original';
+    actions.appendChild(viewBtn);
+    card.appendChild(actions);
 
     if (canvas) {
-        card.querySelector('.badge-image-container').appendChild(canvas);
+        imageContainer.appendChild(canvas);
     }
 
-    card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    // Only open URL if it is http(s) to prevent javascript:/data: injection
+    const imageUrl = typeof badge.image_url === 'string' ? badge.image_url : '';
+    const isHttpUrl = /^https?:\/\//i.test(imageUrl);
+
+    dlBtn.addEventListener('click', () => handleDownloadSingle(index, badgeName));
+    viewBtn.addEventListener('click', () => {
+        if (isHttpUrl) window.open(imageUrl, '_blank', 'noopener,noreferrer');
+    });
 
     return card;
 }
@@ -495,29 +521,50 @@ function createCommonCard(badge, globalIndex, holders) {
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
     const issuer = badge.badge_template?.issuer_org_name || '';
     const holderCount = holders.size;
-    const holdersHtml = Array.from(holders)
-        .map(h => `<span class="holder-tag">${userDisplayNames[h] || h}</span>`)
-        .join('');
 
-    card.innerHTML = `
-        <div class="badge-image-container"></div>
-        <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            ${issuer ? `<div class="badge-meta">${issuer}</div>` : ''}
-            <div class="badge-meta holders-count">${holderCount} ${holderCount === 1 ? 'person' : 'people'}</div>
-        </div>
-        <div class="holders-list">${holdersHtml}</div>
-    `;
+    const container = document.createElement('div');
+    container.className = 'badge-image-container';
+    card.appendChild(container);
+
+    const info = document.createElement('div');
+    info.className = 'badge-info';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'badge-name';
+    nameDiv.textContent = badgeName;
+    info.appendChild(nameDiv);
+    if (issuer) {
+        const issuerDiv = document.createElement('div');
+        issuerDiv.className = 'badge-meta';
+        issuerDiv.textContent = issuer;
+        info.appendChild(issuerDiv);
+    }
+    const holdersCountDiv = document.createElement('div');
+    holdersCountDiv.className = 'badge-meta holders-count';
+    holdersCountDiv.textContent = `${holderCount} ${holderCount === 1 ? 'person' : 'people'}`;
+    info.appendChild(holdersCountDiv);
+    card.appendChild(info);
+
+    const holdersList = document.createElement('div');
+    holdersList.className = 'holders-list';
+    for (const h of holders) {
+        const tag = document.createElement('span');
+        tag.className = 'holder-tag';
+        tag.textContent = userDisplayNames[h] || h;
+        holdersList.appendChild(tag);
+    }
+    card.appendChild(holdersList);
 
     const canvas = processedBadges[globalIndex];
-    const container = card.querySelector('.badge-image-container');
     if (canvas) {
         const img = document.createElement('img');
         img.src = canvas.toDataURL('image/png');
         img.style.cssText = 'max-width:100%;max-height:100%;display:block;';
         container.appendChild(img);
     } else {
-        container.innerHTML = '<div style="color:#dc3545;font-size:0.875rem;">Image not available</div>';
+        const fallback = document.createElement('div');
+        fallback.style.cssText = 'color:#dc3545;font-size:0.875rem;';
+        fallback.textContent = 'Image not available';
+        container.appendChild(fallback);
     }
 
     return card;
@@ -546,17 +593,29 @@ function renderByCertification() {
 
     const table = document.createElement('table');
     table.className = 'certification-table';
-    table.innerHTML = `
-        <thead>
-            <tr><th>Certification</th><th>Holders</th></tr>
-        </thead>
-        <tbody>
-            ${sorted.map(({ badge, holders }) => {
-                const name = badge.badge_template?.name || badge.name || 'Unknown';
-                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
-            }).join('')}
-        </tbody>
-    `;
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    for (const label of ['Certification', 'Holders']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const { badge, holders } of sorted) {
+        const name = badge.badge_template?.name || badge.name || 'Unknown';
+        const tr = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = name;
+        const countTd = document.createElement('td');
+        countTd.textContent = String(holders.size);
+        tr.appendChild(nameTd);
+        tr.appendChild(countTd);
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
     certificationGrid.appendChild(table);
 }
 
@@ -1216,12 +1275,21 @@ async function initQuickSelect() {
         const label = document.createElement('label');
         label.className = 'country-pill' + (isCustomCountry(country) ? ' country-pill--custom' : '');
         label.dataset.country = country;
-        label.innerHTML = `
-            <input type="checkbox">
-            <span>${country}</span>
-            <span class="country-pill-count">(${urls.length})</span>
-        `;
-        label.querySelector('input').addEventListener('change', onCountryChange);
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        label.appendChild(checkbox);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = country;
+        label.appendChild(nameSpan);
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'country-pill-count';
+        countSpan.textContent = `(${urls.length})`;
+        label.appendChild(countSpan);
+
+        checkbox.addEventListener('change', onCountryChange);
         pills.appendChild(label);
     }
 

@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 // Load secrets from a local .env file if present. .env is gitignored and never
 // committed, so no password ever lives in the (public) source code.
@@ -24,7 +26,64 @@ for (const [name, value] of [['APP_PASSWORD', PASSWORD], ['SITE_PASSWORD', SITE_
     }
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
+
+// Trust the first hop (nginx reverse proxy) so rate limiting and Basic Auth see
+// the original client IP via X-Forwarded-For. Adjust if the deployment topology
+// changes — never set this to `true` in untrusted environments (would let
+// clients spoof their IP via headers and bypass rate limits).
+app.set('trust proxy', 1);
+
+// --- Security headers (helmet) ---
+// CSP allows the lone third-party script (cdnjs for JSZip in index.html) plus
+// the inline styles used by some dynamically-built badge cards. Inline scripts
+// remain blocked.
+app.use(helmet({
+    contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", 'https://cdnjs.cloudflare.com'],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'img-src': ["'self'", 'data:', 'blob:', 'https://images.credly.com', 'https://www.credly.com'],
+            'connect-src': ["'self'"],
+            'frame-ancestors': ["'none'"],
+            'object-src': ["'none'"],
+            'base-uri': ["'self'"],
+        },
+    },
+    frameguard: { action: 'deny' },
+    hsts: { maxAge: 15552000, includeSubDomains: true },
+    referrerPolicy: { policy: 'no-referrer' },
+}));
+
+// --- Rate limiting ---
+// Brute-force protection on the site-wide Basic Auth gate (applied to every
+// request) and on profile-mutation endpoints (which check APP_PASSWORD).
+const globalLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests' },
+});
+const authFailureLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30, // 30 failed auth attempts per IP per 15 min
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: 'Too many failed authentication attempts. Try again later.',
+});
+const writeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests' },
+});
+
+app.use(globalLimiter);
 
 // --- Site-wide access gate (HTTP Basic Auth) ---
 // Protects every route (pages, assets, and /api/*) behind a single password.
@@ -36,7 +95,7 @@ function safeEqual(a, b) {
     return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
-app.use((req, res, next) => {
+app.use(authFailureLimiter, (req, res, next) => {
     const auth = req.headers.authorization || '';
     const [scheme, encoded] = auth.split(' ');
     if (scheme === 'Basic' && encoded) {
@@ -52,7 +111,16 @@ app.use((req, res, next) => {
     return res.status(401).send('Authentication required.');
 });
 
-app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+// Serve only the known static assets. Previously `express.static(__dirname)`
+// exposed every file in the repo root (server.js, package.json, .env.example,
+// data/custom-profiles.json, …) to authenticated users. Whitelist what the
+// browser actually needs.
+const STATIC_WHITELIST = new Set(['style.css', 'script.js']);
+app.get('/:asset', (req, res, next) => {
+    const asset = req.params.asset;
+    if (!STATIC_WHITELIST.has(asset)) return next();
+    return res.sendFile(path.join(__dirname, asset));
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -205,7 +273,32 @@ function createConcurrencyLimiter(max) {
 // --- Batch Badges Endpoint ---
 // Fetches profile info + all badges for multiple usernames in one request
 
+// Credly usernames are alphanumeric, dash, underscore, and dot (for the
+// occasional hex suffix like `karim-benmalek.6cb8ceb3`). Anything else is
+// rejected to prevent path traversal / SSRF via URL injection.
+const USERNAME_RE = /^[a-zA-Z0-9._-]{1,100}$/;
+function isValidUsername(u) {
+    return typeof u === 'string' && USERNAME_RE.test(u);
+}
+
+// Hostname allowlist applied to every outbound HTTPS request. Same list used by
+// the /api/credly proxy. Keeps an attacker-controlled `next_page_url` (or any
+// future field the backend follows) from pivoting to arbitrary hosts.
+function isAllowedUpstreamUrl(rawUrl) {
+    try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'https:') return false;
+        return ALLOWED_CREDLY_HOSTS.includes(parsed.hostname);
+    } catch {
+        return false;
+    }
+}
+
 function fetchUrl(url) {
+    if (!isAllowedUpstreamUrl(url)) {
+        return Promise.reject(new Error('Disallowed upstream URL'));
+    }
+
     const cacheKey = url;
     const cached = getCached(cacheKey);
     if (cached) return Promise.resolve(JSON.parse(cached.buffer.toString()));
@@ -235,20 +328,28 @@ function fetchUrl(url) {
 }
 
 async function fetchAllBadges(username) {
+    if (!isValidUsername(username)) throw new Error('Invalid username');
     const allBadges = [];
-    let nextUrl = `https://www.credly.com/users/${username}/badges.json`;
-    while (nextUrl) {
+    let nextUrl = `https://www.credly.com/users/${encodeURIComponent(username)}/badges.json`;
+    // Cap pagination so a malicious upstream cannot make us loop forever.
+    let pages = 0;
+    while (nextUrl && pages < 50) {
         const data = await fetchUrl(nextUrl);
         if (!data.data) break;
         allBadges.push(...data.data);
-        nextUrl = data.metadata?.next_page_url || null;
+        const next = data.metadata?.next_page_url || null;
+        // Only follow next URLs that satisfy the same hostname allowlist used by
+        // fetchUrl; reject anything else to block SSRF via crafted upstream JSON.
+        nextUrl = next && isAllowedUpstreamUrl(next) ? next : null;
+        pages++;
     }
     return allBadges;
 }
 
 async function fetchDisplayName(username) {
+    if (!isValidUsername(username)) return username;
     try {
-        const data = await fetchUrl(`https://www.credly.com/users/${username}.json`);
+        const data = await fetchUrl(`https://www.credly.com/users/${encodeURIComponent(username)}.json`);
         const user = data.data;
         if (user) {
             const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
@@ -265,6 +366,9 @@ app.post('/api/batch-badges', async (req, res) => {
     }
     if (usernames.length > 100) {
         return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    }
+    if (!usernames.every(isValidUsername)) {
+        return res.status(400).json({ error: 'Invalid username in request' });
     }
 
     const limit = createConcurrencyLimiter(10);
@@ -295,6 +399,9 @@ app.get('/api/batch-badges-stream', (req, res) => {
     const usernames = raw.split(',').map(u => u.trim()).filter(Boolean);
     if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
     if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    if (!usernames.every(isValidUsername)) {
+        return res.status(400).json({ error: 'Invalid username in request' });
+    }
 
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -340,8 +447,13 @@ app.get('/api/profiles', (req, res) => {
     res.json(readProfiles());
 });
 
+// Country names are user-supplied and rendered as text in the dashboard. Cap
+// length and constrain to a reasonable character set so XSS-y payloads can't
+// be persisted even if a client ever skips escaping.
+const COUNTRY_RE = /^[\p{L}\p{N}\s.()&_-]{1,60}$/u;
+
 // Add a profile
-app.post('/api/profiles', (req, res) => {
+app.post('/api/profiles', writeLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
@@ -350,7 +462,11 @@ app.post('/api/profiles', (req, res) => {
     if (!country || typeof country !== 'string' || !country.trim()) {
         return res.status(400).json({ error: 'Country is required.' });
     }
-    if (!url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
+    const trimmedCountry = country.trim();
+    if (!COUNTRY_RE.test(trimmedCountry)) {
+        return res.status(400).json({ error: 'Country name contains invalid characters.' });
+    }
+    if (typeof url !== 'string' || !url || !/credly\.com\/users\/[^\/\s]+/i.test(url)) {
         return res.status(400).json({ error: 'Invalid Credly profile URL.' });
     }
 
@@ -364,7 +480,6 @@ app.post('/api/profiles', (req, res) => {
         }
     }
 
-    const trimmedCountry = country.trim();
     if (!profiles[trimmedCountry]) profiles[trimmedCountry] = [];
 
     const fullUrl = /^https?:\/\//.test(url) ? url : `https://www.credly.com/users/${url}`;
@@ -375,7 +490,7 @@ app.post('/api/profiles', (req, res) => {
 });
 
 // Remove a profile
-app.delete('/api/profiles', (req, res) => {
+app.delete('/api/profiles', writeLimiter, (req, res) => {
     const { password, country, url } = req.body;
 
     if (password !== PASSWORD) {
