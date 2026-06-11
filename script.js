@@ -412,12 +412,12 @@ function createBadgeCard(badge, canvas, index) {
             ${canvas ? '' : '<div class="spinner"></div>'}
         </div>
         <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            <div class="badge-meta">Issued: ${issuedAt}</div>
+            <div class="badge-name">${escapeHTML(badgeName)}</div>
+            <div class="badge-meta">Issued: ${escapeHTML(issuedAt)}</div>
         </div>
         <div class="badge-actions">
-            <button class="download-btn" data-index="${index}">Download PNG</button>
-            <button class="view-original-btn" data-url="${badge.image_url}">View Original</button>
+            <button class="download-btn">Download PNG</button>
+            <button class="view-original-btn">View Original</button>
         </div>
     `;
 
@@ -496,14 +496,14 @@ function createCommonCard(badge, globalIndex, holders) {
     const issuer = badge.badge_template?.issuer_org_name || '';
     const holderCount = holders.size;
     const holdersHtml = Array.from(holders)
-        .map(h => `<span class="holder-tag">${userDisplayNames[h] || h}</span>`)
+        .map(h => `<span class="holder-tag">${escapeHTML(userDisplayNames[h] || h)}</span>`)
         .join('');
 
     card.innerHTML = `
         <div class="badge-image-container"></div>
         <div class="badge-info">
-            <div class="badge-name">${badgeName}</div>
-            ${issuer ? `<div class="badge-meta">${issuer}</div>` : ''}
+            <div class="badge-name">${escapeHTML(badgeName)}</div>
+            ${issuer ? `<div class="badge-meta">${escapeHTML(issuer)}</div>` : ''}
             <div class="badge-meta holders-count">${holderCount} ${holderCount === 1 ? 'person' : 'people'}</div>
         </div>
         <div class="holders-list">${holdersHtml}</div>
@@ -553,7 +553,7 @@ function renderByCertification() {
         <tbody>
             ${sorted.map(({ badge, holders }) => {
                 const name = badge.badge_template?.name || badge.name || 'Unknown';
-                return `<tr><td>${name}</td><td>${holders.size}</td></tr>`;
+                return `<tr><td>${escapeHTML(name)}</td><td>${holders.size}</td></tr>`;
             }).join('')}
         </tbody>
     `;
@@ -1044,6 +1044,13 @@ async function handleDownloadAll() {
     }
 }
 
+// Escape a string for safe interpolation into innerHTML templates
+function escapeHTML(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
 // Escape a value for CSV
 function escapeCSV(value) {
     const str = String(value ?? '');
@@ -1218,7 +1225,7 @@ async function initQuickSelect() {
         label.dataset.country = country;
         label.innerHTML = `
             <input type="checkbox">
-            <span>${country}</span>
+            <span>${escapeHTML(country)}</span>
             <span class="country-pill-count">(${urls.length})</span>
         `;
         label.querySelector('input').addEventListener('change', onCountryChange);

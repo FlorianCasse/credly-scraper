@@ -21,8 +21,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### M1 — XSS via `innerHTML` avec des données contrôlées par des tiers (Credly)
 - **Fichiers :** `script.js` — `createBadgeCard()` (~l.410), `createCommonCard()` (~l.502), `renderByCertification()` (~l.549), `exportCertificationCSV` non concerné.
 - **Détail :** les noms de badges (`badge_template.name`), les émetteurs (`issuer_org_name`), les display names (`first_name`/`last_name` saisis par les utilisateurs Credly) et `badge.image_url` sont interpolés dans `innerHTML` sans échappement. Un profil Credly malveillant scrappé par un utilisateur authentifié peut exécuter du JS dans sa session.
-- **Correctif :** construire ces nœuds via `textContent`/`createElement`, supprimer `data-url="${badge.image_url}"` au profit d'une closure.
-- **Statut :** à corriger
+- **Correctif :** échappement HTML systématique (`escapeHTML`) des données tierces interpolées, suppression des attributs `data-url`/`data-index` inutilisés (les listeners utilisent déjà des closures).
+- **Statut :** ✅ corrigé
 
 ### M2 — Liste des profils prédéfinis dupliquée serveur/client et **déjà désynchronisée**
 - **Fichiers :** `server.js` (`getAllPredefinedUsernames`, ~l.413) vs `script.js` (`PREDEFINED_PROFILES`, ~l.48).
