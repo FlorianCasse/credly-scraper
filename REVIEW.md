@@ -27,8 +27,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### M2 — Liste des profils prédéfinis dupliquée serveur/client et **déjà désynchronisée**
 - **Fichiers :** `server.js` (`getAllPredefinedUsernames`, ~l.413) vs `script.js` (`PREDEFINED_PROFILES`, ~l.48).
 - **Détail :** le serveur (prewarm du cache) a sa propre copie en dur. Elle a déjà divergé : côté serveur, Germany n'a que 1 profil (21 côté client), Netherlands manque 4 profils et en contient 1 retiré (`wesley-geelhoed`), Nordics absent. Le prewarm chauffe donc le cache pour les mauvais profils.
-- **Correctif :** source de vérité unique `predefined-profiles.js` (export UMD : `module.exports` côté Node, global côté navigateur), consommée par `server.js` et `index.html`/`script.js`.
-- **Statut :** à corriger
+- **Correctif :** source de vérité unique `predefined-profiles.js` (export UMD : `module.exports` côté Node, global côté navigateur), consommée par `server.js` et `index.html`/`script.js`. Le prewarm couvre maintenant les 91 profils (au lieu de ~64).
+- **Statut :** ✅ corrigé
 
 ### M3 — Aucun test, aucun lint, aucun script de vérification
 - **Fichiers :** `package.json` (seul script : `start`).

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const PREDEFINED_PROFILES = require('./predefined-profiles');
 
 // Load secrets from a local .env file if present. .env is gitignored and never
 // committed, so no password ever lives in the (public) source code.
@@ -409,17 +410,8 @@ function getAllPredefinedUsernames() {
     try {
         const custom = readProfiles();
         const allUrls = [];
-        // Hardcoded predefined profiles (mirror of script.js PREDEFINED_PROFILES)
-        const predefined = {
-            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam','steven-charrier','alaa-badaoui.c4e8b5c2','edouard-topin','olivier-hamon-29'],
-            'Belgium': ['alexandre-francois.18d3df90','andy-ayite-zonor','igor-jemuce','jan-horrix','kevin-burgers','michael-van-de-gaer','michielpeene','stijnvermoesen','sven-cranshoff','wannes-de-boodt','yason-prufer'],
-            'Luxembourg': ['amaury-sobaco.abfaee41','davy-stoffel','franki-sohmoe-kamte','miguel-brasseur.18fd467e','sestegra','valentin-collin.88f97edb'],
-            'Germany': ['malte-wilhelm'],
-            'Netherlands': ['albin-qorri.fcfad0f5','arie-jan-bodde','bart-lievers','bart-mulder','bavo-van-der-krieken.62003c0a','danny-rotmeijer','davy-van-de-laar.906902d4','ddejong','dennis-lefeber','dennis-mertens','dirk-jan-alken','eric-honcoop','eric-sloof','erik-verbruggen','gemma-van-der-voorst','hans-lenze-kaper.76804f63','jeroen-buren','kabir-ali.62af15df','luuk-giesbers.91b12124','mitchel-van-ballegooij','paul-van-dieen','rick-verstegen','robert-cranendonk','robin-van-altena','sam-vieillard','sjaak-bakker','toine-eetgerink','vincent-jansen.29312768','vincent-van-vierzen','wesley-van-ede','wesley-geelhoed'],
-        };
-        for (const usernames of Object.values(predefined)) allUrls.push(...usernames);
-        // Add custom profiles
-        for (const urls of Object.values(custom)) {
+        // Predefined (shared with the frontend via predefined-profiles.js) + custom profiles
+        for (const urls of [...Object.values(PREDEFINED_PROFILES), ...Object.values(custom)]) {
             for (const url of urls) {
                 const match = url.match(/\/users\/([^\/\s#?]+)/i);
                 if (match) allUrls.push(match[1]);
