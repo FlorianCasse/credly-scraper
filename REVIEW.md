@@ -49,8 +49,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m1 — `express.static(__dirname)` sert les fichiers internes du projet
 - **Fichier :** `server.js:55`.
 - **Détail :** `GET /server.js`, `/package-lock.json`, `/README.md`, `/data/custom-profiles.json` sont servis. Pas de secret exposé (`.env` est un dotfile, ignoré par défaut), et le repo est public — mais la surface est inutile.
-- **Correctif :** allowlist explicite des assets front (`index.html`, `style.css`, `script.js`, `predefined-profiles.js`).
-- **Statut :** à corriger
+- **Correctif :** allowlist explicite des assets front (`index.html`, `style.css`, `script.js`, `predefined-profiles.js`) + test de non-régression.
+- **Statut :** ✅ corrigé
 
 ### m2 — Comparaison non constant-time du mot de passe admin
 - **Fichier :** `server.js:347, 381` (`password !== PASSWORD`).

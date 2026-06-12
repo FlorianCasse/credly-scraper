@@ -134,6 +134,15 @@ test('GET / serves the app with valid auth', async () => {
     assert.match(await res.text(), /Credly Badge Scraper/);
 });
 
+test('only allowlisted frontend assets are served as static files', async () => {
+    for (const ok of ['/index.html', '/style.css', '/script.js', '/predefined-profiles.js']) {
+        assert.strictEqual((await req(ok)).status, 200, ok);
+    }
+    for (const blocked of ['/server.js', '/package.json', '/package-lock.json', '/README.md', '/data/custom-profiles.json']) {
+        assert.strictEqual((await req(blocked)).status, 404, blocked);
+    }
+});
+
 test('GET /api/credly validates its url parameter', async () => {
     assert.strictEqual((await req('/api/credly')).status, 400);
     assert.strictEqual((await req('/api/credly?url=not-a-url')).status, 400);

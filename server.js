@@ -54,7 +54,11 @@ app.use((req, res, next) => {
     return res.status(401).send('Authentication required.');
 });
 
-app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+// Serve only the frontend assets — never server code, data files or repo metadata.
+const STATIC_FILES = ['index.html', 'style.css', 'script.js', 'predefined-profiles.js'];
+for (const file of STATIC_FILES) {
+    app.get('/' + file, (req, res) => res.sendFile(path.join(__dirname, file)));
+}
 
 // Serve index.html for root
 app.get('/', (req, res) => {
