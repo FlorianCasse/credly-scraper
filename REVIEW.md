@@ -73,7 +73,7 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 - **Fichier :** `server.js` (`writeProfiles`).
 - **Détail :** `writeFileSync` direct : un crash en cours d'écriture corrompt le fichier (et `readProfiles()` retournerait `{}` en silence = perte de données).
 - **Correctif :** écrire dans un fichier temporaire puis `renameSync` (atomique sur le même volume).
-- **Statut :** à corriger
+- **Statut :** ✅ corrigé
 
 ### m6 — `JSON.parse(event.data)` sans try/catch dans le handler SSE
 - **Fichier :** `script.js` (`handleFetchBadges`, `eventSource.onmessage`).

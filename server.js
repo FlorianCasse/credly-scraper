@@ -76,7 +76,10 @@ function readProfiles() {
 }
 
 function writeProfiles(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    // Write-then-rename so a crash mid-write can never corrupt the data file.
+    const tmp = DATA_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, DATA_FILE);
 }
 
 function normalizeUrl(url) {
