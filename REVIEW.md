@@ -83,8 +83,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m7 — Accessibilité : messages dynamiques, onglets et images sans sémantique
 - **Fichiers :** `index.html`, `script.js`.
 - **Détail :** `#error-message`/`#info-message` sans `role`/`aria-live` (les lecteurs d'écran ratent les erreurs) ; onglets sans `role="tab"`/`aria-selected` ; canvas de badges sans nom accessible ; spinner sans `aria-hidden`.
-- **Correctif :** `role="alert"`/`role="status"` sur les messages, `role="img"` + `aria-label` sur les conteneurs d'images, `aria-selected` sur les onglets.
-- **Statut :** à corriger
+- **Correctif :** `role="alert"`/`role="status"` sur les messages, `role="img"` + `aria-label` sur les conteneurs d'images de badges, `role="tablist"`/`role="tab"` + `aria-selected` maintenu par `showTab()`, spinners `aria-hidden`.
+- **Statut :** ✅ corrigé
 
 ### m8 — README et footer décrivent des fonctionnalités supprimées
 - **Fichiers :** `README.md` (« Self-service profile registration — modal dialog », supprimé en #38), section déploiement Pages.

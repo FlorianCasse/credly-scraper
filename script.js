@@ -304,8 +304,8 @@ function createBadgeCard(badge, canvas, index) {
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
 
     card.innerHTML = `
-        <div class="badge-image-container">
-            ${canvas ? '' : '<div class="spinner"></div>'}
+        <div class="badge-image-container" role="img" aria-label="${escapeHTML(badgeName)} badge image">
+            ${canvas ? '' : '<div class="spinner" aria-hidden="true"></div>'}
         </div>
         <div class="badge-info">
             <div class="badge-name">${escapeHTML(badgeName)}</div>
@@ -330,7 +330,9 @@ function createBadgeCard(badge, canvas, index) {
 // Switch between "common" and "by-profile" tabs (lazy render)
 function showTab(tabName) {
     resultsTabsEl.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.toggle('tab-btn--active', btn.dataset.tab === tabName);
+        const active = btn.dataset.tab === tabName;
+        btn.classList.toggle('tab-btn--active', active);
+        btn.setAttribute('aria-selected', String(active));
     });
     commonGrid.style.display = tabName === 'common' ? 'grid' : 'none';
     certificationGrid.style.display = tabName === 'by-certification' ? 'block' : 'none';
@@ -396,7 +398,7 @@ function createCommonCard(badge, globalIndex, holders) {
         .join('');
 
     card.innerHTML = `
-        <div class="badge-image-container"></div>
+        <div class="badge-image-container" role="img" aria-label="${escapeHTML(badgeName)} badge image"></div>
         <div class="badge-info">
             <div class="badge-name">${escapeHTML(badgeName)}</div>
             ${issuer ? `<div class="badge-meta">${escapeHTML(issuer)}</div>` : ''}
