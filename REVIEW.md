@@ -39,8 +39,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### M4 — GitHub Pages publie une copie publique, non authentifiée et cassée du site
 - **Fichiers :** `.github/workflows/deploy.yml` ; vérifié en ligne : `https://floriancasse.github.io/credly-scraper/` répond 200 sans auth.
 - **Détail :** le site a été volontairement mis derrière HTTP Basic Auth (#36), mais le workflow déploie tout le repo sur GitHub Pages, publiquement. La copie est non fonctionnelle (aucun backend `/api`, donc fetch cassé) mais expose une UI publique listant l'outil et son contenu, en contradiction directe avec la décision de gating.
-- **Correctif :** supprimer le workflow. ⚠️ **Action manuelle requise :** désactiver GitHub Pages dans les settings du repo (ou `gh api -X DELETE repos/FlorianCasse/credly-scraper/pages`) — non fait automatiquement car action destructive côté GitHub.
-- **Statut :** à corriger
+- **Correctif :** workflow supprimé. ⚠️ **Action manuelle requise :** désactiver GitHub Pages dans les settings du repo (ou `gh api -X DELETE repos/FlorianCasse/credly-scraper/pages`) pour dépublier la copie existante — non fait automatiquement car action destructive côté GitHub.
+- **Statut :** ✅ corrigé (workflow) / ⚠️ dépublication Pages à faire manuellement
 
 ---
 
