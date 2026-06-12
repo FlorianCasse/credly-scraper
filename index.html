@@ -50,11 +50,11 @@
 
                 <button id="fetch-btn" class="primary-btn">
                     <span class="btn-text">Fetch Badges</span>
-                    <span class="spinner" style="display: none;"></span>
+                    <span class="spinner" style="display: none;" aria-hidden="true"></span>
                 </button>
 
-                <div id="error-message" class="error" style="display: none;"></div>
-                <div id="info-message" class="info" style="display: none;"></div>
+                <div id="error-message" class="error" role="alert" style="display: none;"></div>
+                <div id="info-message" class="info" role="status" style="display: none;"></div>
             </section>
 
             <section id="results-section" class="results-section" style="display: none;">
@@ -66,11 +66,11 @@
                     </div>
                 </div>
 
-                <div id="results-tabs" class="results-tabs" style="display: none;">
-                    <button class="tab-btn tab-btn--active" data-tab="common">Common Certifications</button>
-                    <button class="tab-btn" data-tab="by-certification">By Certification</button>
-                    <button class="tab-btn" data-tab="by-profile">By Profile</button>
-                    <button class="tab-btn" data-tab="qbr">QBR Report</button>
+                <div id="results-tabs" class="results-tabs" style="display: none;" role="tablist" aria-label="Result views">
+                    <button class="tab-btn tab-btn--active" data-tab="common" role="tab" aria-selected="true">Common Certifications</button>
+                    <button class="tab-btn" data-tab="by-certification" role="tab" aria-selected="false">By Certification</button>
+                    <button class="tab-btn" data-tab="by-profile" role="tab" aria-selected="false">By Profile</button>
+                    <button class="tab-btn" data-tab="qbr" role="tab" aria-selected="false">QBR Report</button>
                 </div>
 
                 <div id="common-grid" class="common-grid" style="display: none;"></div>
@@ -91,7 +91,10 @@
         </footer>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+            integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="predefined-profiles.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

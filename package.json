@@ -4,7 +4,9 @@
   "description": "Credly badge scraper with profile management",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "lint": "node --check server.js && node --check script.js && node --check predefined-profiles.js && bash -n credly_badge_downloader.sh"
   },
   "dependencies": {
     "express": "^4.21.0"

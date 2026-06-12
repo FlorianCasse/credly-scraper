@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
+const PREDEFINED_PROFILES = require('./predefined-profiles');
 
 // Load secrets from a local .env file if present. .env is gitignored and never
 // committed, so no password ever lives in the (public) source code.
@@ -13,7 +14,8 @@ const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD;
 const SITE_USER = process.env.SITE_USER || 'credly';
 const SITE_PASSWORD = process.env.SITE_PASSWORD;
-const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
+// DATA_FILE is overridable via env so tests can use an isolated file.
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'custom-profiles.json');
 
 // Fail fast if a required secret is missing — there are no insecure hardcoded
 // defaults to fall back on.
@@ -52,7 +54,11 @@ app.use((req, res, next) => {
     return res.status(401).send('Authentication required.');
 });
 
-app.use(express.static(__dirname, { index: false, extensions: ['html', 'css', 'js'] }));
+// Serve only the frontend assets — never server code, data files or repo metadata.
+const STATIC_FILES = ['index.html', 'style.css', 'script.js', 'predefined-profiles.js'];
+for (const file of STATIC_FILES) {
+    app.get('/' + file, (req, res) => res.sendFile(path.join(__dirname, file)));
+}
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -70,7 +76,10 @@ function readProfiles() {
 }
 
 function writeProfiles(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    // Write-then-rename so a crash mid-write can never corrupt the data file.
+    const tmp = DATA_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, DATA_FILE);
 }
 
 function normalizeUrl(url) {
@@ -344,7 +353,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (typeof password !== 'string' || !safeEqual(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -378,7 +387,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (typeof password !== 'string' || !safeEqual(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
@@ -409,17 +418,8 @@ function getAllPredefinedUsernames() {
     try {
         const custom = readProfiles();
         const allUrls = [];
-        // Hardcoded predefined profiles (mirror of script.js PREDEFINED_PROFILES)
-        const predefined = {
-            'France': ['bouti-abdelkader','alangar','antoine-giraud.519d47bd','benjamin-yobe','florian-casse','hassan-ben-taher','hatem-bouzouita','karim-benmalek.6cb8ceb3','olivier-boulat.2c807e36','philippe-cheron.ab050cb5','sebastien-aucouturier','leonardo-coscia','vincent-taupenas','nicolas-pandjatcharam','steven-charrier','alaa-badaoui.c4e8b5c2','edouard-topin','olivier-hamon-29'],
-            'Belgium': ['alexandre-francois.18d3df90','andy-ayite-zonor','igor-jemuce','jan-horrix','kevin-burgers','michael-van-de-gaer','michielpeene','stijnvermoesen','sven-cranshoff','wannes-de-boodt','yason-prufer'],
-            'Luxembourg': ['amaury-sobaco.abfaee41','davy-stoffel','franki-sohmoe-kamte','miguel-brasseur.18fd467e','sestegra','valentin-collin.88f97edb'],
-            'Germany': ['malte-wilhelm'],
-            'Netherlands': ['albin-qorri.fcfad0f5','arie-jan-bodde','bart-lievers','bart-mulder','bavo-van-der-krieken.62003c0a','danny-rotmeijer','davy-van-de-laar.906902d4','ddejong','dennis-lefeber','dennis-mertens','dirk-jan-alken','eric-honcoop','eric-sloof','erik-verbruggen','gemma-van-der-voorst','hans-lenze-kaper.76804f63','jeroen-buren','kabir-ali.62af15df','luuk-giesbers.91b12124','mitchel-van-ballegooij','paul-van-dieen','rick-verstegen','robert-cranendonk','robin-van-altena','sam-vieillard','sjaak-bakker','toine-eetgerink','vincent-jansen.29312768','vincent-van-vierzen','wesley-van-ede','wesley-geelhoed'],
-        };
-        for (const usernames of Object.values(predefined)) allUrls.push(...usernames);
-        // Add custom profiles
-        for (const urls of Object.values(custom)) {
+        // Predefined (shared with the frontend via predefined-profiles.js) + custom profiles
+        for (const urls of [...Object.values(PREDEFINED_PROFILES), ...Object.values(custom)]) {
             for (const url of urls) {
                 const match = url.match(/\/users\/([^\/\s#?]+)/i);
                 if (match) allUrls.push(match[1]);
@@ -457,7 +457,22 @@ async function prewarmCache() {
     console.log('[prewarm] Cache warming complete');
 }
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    prewarmCache();
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+        prewarmCache();
+    });
+}
+
+// Exported for the test suite (tests/server.test.js)
+module.exports = {
+    app,
+    safeEqual,
+    normalizeUrl,
+    readProfiles,
+    writeProfiles,
+    createConcurrencyLimiter,
+    getCached,
+    setCache,
+    getAllPredefinedUsernames,
+};
