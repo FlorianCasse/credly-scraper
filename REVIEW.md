@@ -78,7 +78,7 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m6 — `JSON.parse(event.data)` sans try/catch dans le handler SSE
 - **Fichier :** `script.js` (`handleFetchBadges`, `eventSource.onmessage`).
 - **Détail :** un événement malformé jette une exception non gérée et le profil est silencieusement perdu.
-- **Statut :** à corriger
+- **Statut :** ✅ corrigé
 
 ### m7 — Accessibilité : messages dynamiques, onglets et images sans sémantique
 - **Fichiers :** `index.html`, `script.js`.

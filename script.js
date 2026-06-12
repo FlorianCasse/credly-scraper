@@ -756,7 +756,13 @@ async function handleFetchBadges() {
             const eventSource = new EventSource(url);
 
             eventSource.onmessage = (event) => {
-                const result = JSON.parse(event.data);
+                let result;
+                try {
+                    result = JSON.parse(event.data);
+                } catch {
+                    console.warn('Skipping malformed SSE event:', event.data);
+                    return;
+                }
                 profilesReceived++;
                 showInfo(`Received ${profilesReceived}/${usernames.length} profiles...`);
 
