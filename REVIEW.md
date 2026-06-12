@@ -55,8 +55,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m2 — Comparaison non constant-time du mot de passe admin
 - **Fichier :** `server.js:347, 381` (`password !== PASSWORD`).
 - **Détail :** la Basic Auth utilise `timingSafeEqual` mais pas les routes profils.
-- **Correctif :** réutiliser `safeEqual()`.
-- **Statut :** à corriger
+- **Correctif :** réutiliser `safeEqual()` (+ garde `typeof string` contre les payloads non-string).
+- **Statut :** ✅ corrigé
 
 ### m3 — Script CDN JSZip sans SRI
 - **Fichier :** `index.html:94`.

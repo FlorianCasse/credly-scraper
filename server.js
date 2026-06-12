@@ -350,7 +350,7 @@ app.get('/api/profiles', (req, res) => {
 app.post('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (typeof password !== 'string' || !safeEqual(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || typeof country !== 'string' || !country.trim()) {
@@ -384,7 +384,7 @@ app.post('/api/profiles', (req, res) => {
 app.delete('/api/profiles', (req, res) => {
     const { password, country, url } = req.body;
 
-    if (password !== PASSWORD) {
+    if (typeof password !== 'string' || !safeEqual(password, PASSWORD)) {
         return res.status(401).json({ error: 'Incorrect password.' });
     }
     if (!country || !url) {
