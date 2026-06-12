@@ -33,8 +33,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### M3 — Aucun test, aucun lint, aucun script de vérification
 - **Fichiers :** `package.json` (seul script : `start`).
 - **Détail :** zéro test automatisé sur la logique serveur (validation des profils, cache LRU/TTL, limiteur de concurrence, normalisation d'URL, auth) ; aucun lint. Toute régression passe inaperçue.
-- **Correctif :** exporter les helpers de `server.js` (démarrage conditionné à `require.main === module`), ajouter des tests `node:test` (sans dépendance) couvrant auth Basic, validation/CRUD des profils, cache, limiteur, normalisation ; scripts npm `test` et `lint` (`node --check` + `bash -n`).
-- **Statut :** à corriger
+- **Correctif :** helpers exportés depuis `server.js` (démarrage conditionné à `require.main === module`, `DATA_FILE` surchargeable par env pour l'isolation des tests), suite `tests/server.test.js` en `node:test` pur (11 tests : auth Basic, validation `/api/credly` et `/api/batch-badges`, CRUD profils avec doublons, cache, limiteur de concurrence, normalisation, fusion prédéfinis+custom) ; scripts npm `test` et `lint` (`node --check` ×3 + `bash -n`).
+- **Statut :** ✅ corrigé
 
 ### M4 — GitHub Pages publie une copie publique, non authentifiée et cassée du site
 - **Fichiers :** `.github/workflows/deploy.yml` ; vérifié en ligne : `https://floriancasse.github.io/credly-scraper/` répond 200 sans auth.

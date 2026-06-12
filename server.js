@@ -14,7 +14,8 @@ const PORT = process.env.PORT || 3002;
 const PASSWORD = process.env.APP_PASSWORD;
 const SITE_USER = process.env.SITE_USER || 'credly';
 const SITE_PASSWORD = process.env.SITE_PASSWORD;
-const DATA_FILE = path.join(__dirname, 'data', 'custom-profiles.json');
+// DATA_FILE is overridable via env so tests can use an isolated file.
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'custom-profiles.json');
 
 // Fail fast if a required secret is missing — there are no insecure hardcoded
 // defaults to fall back on.
@@ -449,7 +450,22 @@ async function prewarmCache() {
     console.log('[prewarm] Cache warming complete');
 }
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    prewarmCache();
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+        prewarmCache();
+    });
+}
+
+// Exported for the test suite (tests/server.test.js)
+module.exports = {
+    app,
+    safeEqual,
+    normalizeUrl,
+    readProfiles,
+    writeProfiles,
+    createConcurrencyLimiter,
+    getCached,
+    setCache,
+    getAllPredefinedUsernames,
+};
