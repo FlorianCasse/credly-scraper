@@ -157,7 +157,7 @@ function createConcurrencyLimiter(max) {
 
 // Extract username from Credly URL
 function extractUsername(url) {
-    const match = url.match(/credly\.com\/users\/([^\/]+)/);
+    const match = url.match(/credly\.com\/users\/([^\/\s#?]+)/i);
     if (!match) {
         throw new Error('Invalid Credly profile URL format. Expected: https://www.credly.com/users/username');
     }

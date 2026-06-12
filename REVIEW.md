@@ -98,7 +98,7 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m10 — `extractUsername` n'exclut pas `?`/`#` (incohérent avec `normalizeProfileUrl`)
 - **Fichier :** `script.js` (`extractUsername`).
 - **Détail :** `https://www.credly.com/users/foo?x=1` donne le username `foo?x=1` → requêtes Credly cassées, alors que `normalizeProfileUrl` gère le cas.
-- **Statut :** à corriger
+- **Statut :** ✅ corrigé (même regex que `normalizeProfileUrl`)
 
 ---
 
