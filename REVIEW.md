@@ -67,7 +67,7 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m4 — `window.open(url, '_blank')` sans `noopener`
 - **Fichier :** `script.js` (`createBadgeCard`).
 - **Correctif :** `window.open(url, '_blank', 'noopener,noreferrer')`.
-- **Statut :** à corriger
+- **Statut :** ✅ corrigé
 
 ### m5 — Écriture non atomique de `data/custom-profiles.json`
 - **Fichier :** `server.js` (`writeProfiles`).

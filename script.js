@@ -322,7 +322,7 @@ function createBadgeCard(badge, canvas, index) {
     }
 
     card.querySelector('.download-btn').addEventListener('click', () => handleDownloadSingle(index, badgeName));
-    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank'));
+    card.querySelector('.view-original-btn').addEventListener('click', () => window.open(badge.image_url, '_blank', 'noopener,noreferrer'));
 
     return card;
 }
