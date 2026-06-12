@@ -61,8 +61,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 ### m3 — Script CDN JSZip sans SRI
 - **Fichier :** `index.html:94`.
 - **Détail :** compromission de cdnjs = exécution de JS arbitraire dans une app authentifiée.
-- **Correctif :** attributs `integrity` + `crossorigin`.
-- **Statut :** à corriger
+- **Correctif :** attributs `integrity` (sha512, vérifié contre l'API cdnjs) + `crossorigin` + `referrerpolicy`.
+- **Statut :** ✅ corrigé
 
 ### m4 — `window.open(url, '_blank')` sans `noopener`
 - **Fichier :** `script.js` (`createBadgeCard`).
