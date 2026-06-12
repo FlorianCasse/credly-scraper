@@ -112,9 +112,16 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 - **n6** — `credly_badge_downloader.sh` duplique la logique de pagination/sanitisation de la web app ; `((counter++))` avec `set -e` est fragile (retourne 1 quand counter passe de 0 à... non applicable ici car counter démarre à 1, mais le pattern est risqué) ; pipeline `while read` en subshell donc `counter` non propagé après la boucle (sans effet ici).
 - **n7** — L'animation `slideIn`/`transition: all` sur `.badge-card` est coûteuse avec des centaines de cartes ; pas de `prefers-reduced-motion`.
 - **n8** — `security-review-credly-scraper.md` est obsolète (décrit un état du code antérieur à #37) ; conservé comme archive historique.
+- **n9** — `fetchAllBadges` (serveur) suit `metadata.next_page_url` tel que renvoyé par l'API Credly sans revalider l'hôte : SSRF théorique uniquement si credly.com renvoie une URL hostile (réponse contrôlée par Credly, pas par l'utilisateur).
 
 ---
 
 ## Itérations
 
-- **Itération 1 (2026-06-11) :** audit initial — 4 major, 10 minor, 8 nitpick. Correctifs en cours dans l'ordre de sévérité.
+- **Itération 1 (2026-06-11→12) :** audit initial — 0 critical, 4 major, 10 minor, 8 nitpick. Correctifs appliqués dans l'ordre de sévérité, un commit chacun, `npm test` + `npm run lint` + smoke test serveur après chaque correctif (12/12 tests verts). Seul m9 (rate limiting) est documenté sans correctif (risque de lock-out derrière le proxy nginx).
+- **Itération 2 (2026-06-12) :** re-passe complète sur l'état final (grep des `innerHTML`/interpolations restantes : toutes constantes ou numériques ; smoke test E2E : auth 401/200, allowlist statique effective, prewarm 91 profils). Un seul finding nouveau, classé nitpick (n9). **Arrêt : il ne reste que des nitpicks.**
+
+### Reste à faire manuellement
+
+1. **M4 :** désactiver GitHub Pages dans les settings du repo pour dépublier `floriancasse.github.io/credly-scraper` (le workflow est supprimé, mais la copie déjà publiée reste en ligne) : `gh api -X DELETE repos/FlorianCasse/credly-scraper/pages`.
+2. **m9 :** ajouter un rate limit sur l'auth côté nginx (`limit_req`) ou configurer `trust proxy` avant tout limiteur applicatif.
