@@ -87,8 +87,8 @@ _Aucun. Pas de secret exposé, auth requise sur toutes les routes serveur._
 - **Statut :** ✅ corrigé
 
 ### m8 — README et footer décrivent des fonctionnalités supprimées
-- **Fichiers :** `README.md` (« Self-service profile registration — modal dialog », supprimé en #38), section déploiement Pages.
-- **Statut :** à corriger
+- **Fichiers :** `README.md` (« Self-service profile registration — modal dialog », supprimé en #38), note GitHub Pages (workflow supprimé en M4), onglet QBR non documenté.
+- **Statut :** ✅ corrigé (+ section Development avec `npm test`/`npm run lint`)
 
 ### m9 — Pas de rate limiting sur les tentatives d'authentification
 - **Fichier :** `server.js` (middleware Basic Auth, `POST/DELETE /api/profiles`).

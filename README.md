@@ -13,11 +13,12 @@ Self-hosted on a dedicated server with an Express.js backend — no third-party 
 ### Features
 
 - **Multiple profiles** — Paste one Credly profile URL per line to scrape several people at once
-- **Country quick-select** — One-click checkboxes to load predefined profiles for France, Belgium, Luxembourg, Germany, and Netherlands
-- **Self-service profile registration** — Add your own Credly profile via a modal dialog (password-protected)
+- **Country quick-select** — One-click checkboxes to load predefined profiles for France, Belgium, Luxembourg, Germany, Netherlands and Nordics, plus group presets (Tout ITQ, Gallia)
+- **Custom profiles API** — Extra profiles can be added/removed server-side via `POST`/`DELETE /api/profiles` (password-protected)
 - **Common Certifications view** — When multiple profiles are loaded, see which certifications are shared across people, sorted by number of holders
 - **By Certification view** — Table ranking all certifications by number of holders
 - **By Profile view** — Browse all certifications organised per person
+- **QBR Report view** — KPI matrix (countries × certification categories) with CSV export in the QBR spreadsheet shape
 - **Keyword filter** — Type a keyword (e.g. VMware, AWS, Azure) to only show matching certifications
 - **Date filter** — Only show certifications issued after a given date
 - **CSV export** — Download the full list as a CSV file (columns: Profile, Name, Issuer, Issued At, Expires At, Badge URL, Image URL)
@@ -53,7 +54,7 @@ Browser  →  Nginx (:8080)  →  Express.js (:3002)  →  Credly API / CDN
 2. Use the country quick-select checkboxes **or** paste Credly profile URLs manually (one per line)
 3. Optionally set a keyword filter and/or an "issued after" date
 4. Click **Fetch Badges** (or press **Ctrl+Enter**)
-5. Switch between **Common Certifications**, **By Certification**, and **By Profile** tabs
+5. Switch between **Common Certifications**, **By Certification**, **By Profile** and **QBR Report** tabs
 6. Export as CSV or download images individually / as a ZIP
 
 ### Self-Hosting
@@ -83,9 +84,12 @@ This is separate from `APP_PASSWORD` (**required**), which additionally protects
 the add/remove-profile actions, so a logged-in viewer still can't edit the
 profile list without the second password.
 
-> Note: the GitHub Pages deployment (`.github/workflows/deploy.yml`) is static
-> hosting and cannot run this gate — only the self-hosted Express server is
-> protected.
+### Development
+
+```bash
+npm test       # node:test suite (tests/)
+npm run lint   # syntax-check all JS files + the shell script
+```
 
 ---
 
