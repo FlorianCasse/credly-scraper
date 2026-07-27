@@ -204,6 +204,7 @@
         ],
         'Nordics': [
             'https://www.credly.com/users/paul-john-mcconnon',
+            'https://www.credly.com/users/rutger-blom.d43e560f',
         ],
     };
 }));
