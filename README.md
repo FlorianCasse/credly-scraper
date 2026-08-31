@@ -21,6 +21,7 @@ Self-hosted on a dedicated server with an Express.js backend — no third-party 
 - **QBR Report view** — KPI matrix (countries × certification categories) with CSV export in the QBR spreadsheet shape
 - **Keyword filter** — Type a keyword (e.g. VMware, AWS, Azure) to only show matching certifications
 - **Date filter** — Only show certifications issued after a given date
+- **Issuer filter** — Select one or more issuers discovered from the current batch (including Red Hat); cards, views and exports use Credly's current issuer data
 - **CSV export** — Download the full list as a CSV file (columns: Profile, Name, Issuer, Issued At, Expires At, Badge URL, Image URL)
 - **ZIP download** — Download all badge images at once as a ZIP, organised into per-profile subfolders
 - **Individual download** — Download any single badge image directly
