@@ -150,7 +150,8 @@ header h1 {
 }
 
 .input-group input,
-.input-group textarea {
+.input-group textarea,
+.input-group select {
     width: 100%;
     padding: 0.75rem;
     border: 2px solid var(--border-color);
@@ -160,13 +161,28 @@ header h1 {
     transition: border-color 0.3s ease;
 }
 
+.input-group select {
+    background: var(--card-background);
+}
+
+.input-group select:disabled {
+    background: var(--background);
+    color: var(--secondary-color);
+    cursor: not-allowed;
+}
+
+.input-group select option {
+    padding: 0.2rem;
+}
+
 .input-group textarea {
     resize: vertical;
     line-height: 1.5;
 }
 
 .input-group input:focus,
-.input-group textarea:focus {
+.input-group textarea:focus,
+.input-group select:focus {
     outline: none;
     border-color: var(--primary-color);
 }
@@ -177,9 +193,15 @@ header h1 {
     color: var(--secondary-color);
 }
 
+.filter-hint {
+    margin-top: 0.35rem;
+    color: var(--secondary-color);
+    font-size: 0.8rem;
+}
+
 .filters-group {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1rem;
 }
 

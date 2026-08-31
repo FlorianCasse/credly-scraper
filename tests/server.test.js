@@ -134,8 +134,21 @@ test('GET / serves the app with valid auth', async () => {
     assert.match(await res.text(), /Credly Badge Scraper/);
 });
 
+test('GET / includes the accessible issuer filter and loads its utility before script.js', async () => {
+    const res = await req('/');
+    const html = await res.text();
+
+    assert.match(html, /<label for="filter-issuer">Filter by issuer/);
+    assert.match(html, /<select[^>]+id="filter-issuer"[^>]+multiple[^>]+disabled/);
+    assert.match(html, /id="filter-issuer-hint"[^>]*>[^<]*(Cmd|Ctrl)[^<]*multi-select/);
+    const utilityIndex = html.indexOf('src="badge-utils.js"');
+    const scriptIndex = html.indexOf('src="script.js"');
+    assert.ok(utilityIndex >= 0);
+    assert.ok(scriptIndex > utilityIndex);
+});
+
 test('only allowlisted frontend assets are served as static files', async () => {
-    for (const ok of ['/index.html', '/style.css', '/script.js', '/predefined-profiles.js']) {
+    for (const ok of ['/index.html', '/style.css', '/script.js', '/predefined-profiles.js', '/badge-utils.js']) {
         assert.strictEqual((await req(ok)).status, 200, ok);
     }
     for (const blocked of ['/server.js', '/package.json', '/package-lock.json', '/README.md', '/data/custom-profiles.json']) {

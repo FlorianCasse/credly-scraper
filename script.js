@@ -5,6 +5,15 @@ let userDisplayNames = {}; // username -> "First Last"
 const imageCache = new Map(); // imageUrl -> Promise<canvas> (deduplication)
 let tabsDirty = false; // true when badges data changed since last tab render
 let renderedTabs = { common: false, 'by-certification': false, qbr: false };
+let issuerOptionsBatchKey = '';
+let issuerFilterTimer = null;
+
+const {
+    getBadgeIssuer,
+    collectIssuerNames,
+    matchesIssuerFilter,
+    shouldClearIssuerFilter,
+} = BadgeUtils;
 
 // Custom profiles from server API
 let cachedCustomProfiles = null;
@@ -111,6 +120,7 @@ const QBR_CATEGORIES = [
 const profileUrlInput = document.getElementById('profile-url');
 const filterKeywordInput = document.getElementById('filter-keyword');
 const filterDateInput = document.getElementById('filter-date');
+const filterIssuerSelect = document.getElementById('filter-issuer');
 const fetchBtn = document.getElementById('fetch-btn');
 const downloadAllBtn = document.getElementById('download-all-btn');
 const exportCsvBtn = document.getElementById('export-csv-btn');
@@ -130,6 +140,12 @@ const spinner = fetchBtn.querySelector('.spinner');
 fetchBtn.addEventListener('click', handleFetchBadges);
 downloadAllBtn.addEventListener('click', handleDownloadAll);
 exportCsvBtn.addEventListener('click', handleExportCSV);
+filterIssuerSelect.addEventListener('change', () => {
+    clearTimeout(issuerFilterTimer);
+    issuerFilterTimer = setTimeout(() => {
+        handleFetchBadges({ preserveImageCache: true, preserveActiveTab: true });
+    }, 400);
+});
 resultsTabsEl.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-btn')) showTab(e.target.dataset.tab);
 });
@@ -200,9 +216,32 @@ function matchesKeyword(badge, keyword) {
     if (!keyword) return true;
     const kw = keyword.toLowerCase();
     const name = (badge.badge_template?.name || badge.name || '').toLowerCase();
-    const issuer = (badge.badge_template?.issuer_org_name || '').toLowerCase();
+    const issuer = getBadgeIssuer(badge).toLowerCase();
     const description = (badge.badge_template?.description || '').toLowerCase();
     return name.includes(kw) || issuer.includes(kw) || description.includes(kw);
+}
+
+// Read the values selected in the native multi-select.
+function getSelectedIssuers() {
+    return Array.from(filterIssuerSelect.selectedOptions, option => option.value);
+}
+
+// Rebuild from raw (unfiltered) batch data while retaining the current selections.
+function rebuildIssuerFilter(rawBadges, selectedIssuers, batchKey) {
+    const issuerNames = collectIssuerNames(rawBadges, selectedIssuers);
+    const selected = new Set(selectedIssuers);
+
+    filterIssuerSelect.innerHTML = '';
+    for (const issuerName of issuerNames) {
+        const option = document.createElement('option');
+        option.value = issuerName;
+        option.textContent = issuerName;
+        option.selected = selected.has(issuerName);
+        filterIssuerSelect.appendChild(option);
+    }
+
+    issuerOptionsBatchKey = batchKey;
+    filterIssuerSelect.disabled = fetchBtn.disabled || issuerNames.length === 0;
 }
 
 // Show/hide messages
@@ -226,6 +265,7 @@ function hideMessages() {
 // Set loading state
 function setLoading(isLoading) {
     fetchBtn.disabled = isLoading;
+    filterIssuerSelect.disabled = isLoading || filterIssuerSelect.options.length === 0;
     if (isLoading) {
         btnText.textContent = 'Fetching...';
         spinner.style.display = 'inline-block';
@@ -301,6 +341,7 @@ function createBadgeCard(badge, canvas, index) {
     card.className = 'badge-card';
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
+    const issuer = getBadgeIssuer(badge);
     const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : 'N/A';
 
     card.innerHTML = `
@@ -309,6 +350,7 @@ function createBadgeCard(badge, canvas, index) {
         </div>
         <div class="badge-info">
             <div class="badge-name">${escapeHTML(badgeName)}</div>
+            ${issuer ? `<div class="badge-meta">Issuer: ${escapeHTML(issuer)}</div>` : ''}
             <div class="badge-meta">Issued: ${escapeHTML(issuedAt)}</div>
         </div>
         <div class="badge-actions">
@@ -391,7 +433,7 @@ function createCommonCard(badge, globalIndex, holders) {
     card.className = 'badge-card';
 
     const badgeName = badge.badge_template?.name || badge.name || 'Unknown Badge';
-    const issuer = badge.badge_template?.issuer_org_name || '';
+    const issuer = getBadgeIssuer(badge);
     const holderCount = holders.size;
     const holdersHtml = Array.from(holders)
         .map(h => `<span class="holder-tag">${escapeHTML(userDisplayNames[h] || h)}</span>`)
@@ -612,13 +654,14 @@ function sanitizeFilename(name) {
 }
 
 // Render a single profile into its pre-created container (data already fetched)
-async function renderOneProfile(username, displayName, rawBadges, container, keyword, filterDate, targetWidth, targetHeight, imageLimit) {
+async function renderOneProfile(username, displayName, rawBadges, container, keyword, filterDate, selectedIssuers, targetWidth, targetHeight, imageLimit) {
     userDisplayNames[username] = displayName;
 
-    // Apply keyword + date filters
+    // Apply keyword + date + issuer filters
     let profileBadges = rawBadges.filter(b =>
         matchesKeyword(b, keyword) &&
-        (!filterDate || (b.issued_at && new Date(b.issued_at) >= filterDate))
+        (!filterDate || (b.issued_at && new Date(b.issued_at) >= filterDate)) &&
+        matchesIssuerFilter(b, selectedIssuers)
     );
 
     // Render profile header
@@ -663,6 +706,9 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
                 if (!canvasPromise) {
                     canvasPromise = loadAndProcessImage(imageUrl, targetWidth, targetHeight);
                     imageCache.set(imageUrl, canvasPromise);
+                    canvasPromise.catch(() => {
+                        if (imageCache.get(imageUrl) === canvasPromise) imageCache.delete(imageUrl);
+                    });
                 }
                 const originalCanvas = await canvasPromise;
 
@@ -686,16 +732,25 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
 }
 
 // Handle fetch badges (SSE streaming)
-async function handleFetchBadges() {
+async function handleFetchBadges(options = {}) {
+    const preserveImageCache = options?.preserveImageCache === true;
+    const preserveActiveTab = options?.preserveActiveTab === true;
+    const previousActiveTab = getActiveTab();
+
+    clearTimeout(issuerFilterTimer);
+    issuerFilterTimer = null;
     hideMessages();
     badgesGrid.innerHTML = '';
     commonGrid.innerHTML = '';
     certificationGrid.innerHTML = '';
+    qbrGrid.innerHTML = '';
     resultsTabsEl.style.display = 'none';
+    commonGrid.style.display = 'none';
+    certificationGrid.style.display = 'none';
+    qbrGrid.style.display = 'none';
     badgesGrid.style.display = 'grid';
     resultsSection.style.display = 'none';
     badges = [];
-    imageCache.clear();
     processedBadges = [];
     userDisplayNames = {};
     tabsDirty = false;
@@ -728,6 +783,17 @@ async function handleFetchBadges() {
         showError('No valid Credly profile URLs found.');
         return;
     }
+
+    const batchKey = usernames.map(username => username.toLowerCase()).join(',');
+    if (!preserveImageCache || issuerOptionsBatchKey !== batchKey) imageCache.clear();
+    let selectedIssuers = getSelectedIssuers();
+    if (shouldClearIssuerFilter(issuerOptionsBatchKey, batchKey)) {
+        selectedIssuers = [];
+        filterIssuerSelect.innerHTML = '';
+        filterIssuerSelect.disabled = true;
+        issuerOptionsBatchKey = '';
+    }
+    const rawBadgesForBatch = [];
 
     if (invalidLines.length > 0) {
         showInfo(`${invalidLines.length} invalid URL(s) skipped. Fetching ${usernames.length} profile(s)...`);
@@ -779,10 +845,13 @@ async function handleFetchBadges() {
                     return;
                 }
 
+                const rawBadges = Array.isArray(result.badges) ? result.badges : [];
+                rawBadgesForBatch.push(...rawBadges);
+
                 const promise = renderOneProfile(
-                    result.username, result.displayName, result.badges,
+                    result.username, result.displayName, rawBadges,
                     container,
-                    keyword, filterDate,
+                    keyword, filterDate, selectedIssuers,
                     targetWidth, targetHeight,
                     imageLimit
                 ).then(() => {
@@ -793,7 +862,7 @@ async function handleFetchBadges() {
                     const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
                     if (distinctProfiles >= 2 && resultsTabsEl.style.display !== 'flex') {
                         resultsTabsEl.style.display = 'flex';
-                        showTab('common');
+                        showTab(preserveActiveTab ? previousActiveTab : 'common');
                     }
                 }).catch(err => {
                     const errHeader = document.createElement('div');
@@ -822,6 +891,7 @@ async function handleFetchBadges() {
 
         // Wait for all in-flight image renders to complete
         await Promise.allSettled(renderPromises);
+        rebuildIssuerFilter(rawBadgesForBatch, selectedIssuers, batchKey);
 
         badgeCount.textContent = `(${badges.length})`;
 
@@ -830,8 +900,14 @@ async function handleFetchBadges() {
         if (distinctProfiles >= 2) {
             tabsDirty = true;
             resultsTabsEl.style.display = 'flex';
-            const activeTab = getActiveTab();
-            showTab(activeTab === 'by-profile' ? 'common' : activeTab);
+            if (preserveActiveTab) {
+                showTab(previousActiveTab);
+            } else {
+                const activeTab = getActiveTab();
+                showTab(activeTab === 'by-profile' ? 'common' : activeTab);
+            }
+        } else {
+            showTab('by-profile');
         }
 
         hideMessages();
@@ -840,6 +916,8 @@ async function handleFetchBadges() {
     } catch (error) {
         // Fallback to POST batch endpoint
         try {
+            badgesGrid.innerHTML = '';
+            rawBadgesForBatch.length = 0;
             const imageLimit = createConcurrencyLimiter(10);
             const res = await fetch('/api/batch-badges', {
                 method: 'POST',
@@ -859,19 +937,24 @@ async function handleFetchBadges() {
                     container.appendChild(errHeader);
                     continue;
                 }
+                const rawBadges = Array.isArray(result.badges) ? result.badges : [];
+                rawBadgesForBatch.push(...rawBadges);
                 await renderOneProfile(
-                    result.username, result.displayName, result.badges,
-                    container, keyword, filterDate,
+                    result.username, result.displayName, rawBadges,
+                    container, keyword, filterDate, selectedIssuers,
                     targetWidth, targetHeight, imageLimit
                 );
             }
 
+            rebuildIssuerFilter(rawBadgesForBatch, selectedIssuers, batchKey);
             badgeCount.textContent = `(${badges.length})`;
             const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
             if (distinctProfiles >= 2) {
                 tabsDirty = true;
                 resultsTabsEl.style.display = 'flex';
-                showTab('common');
+                showTab(preserveActiveTab ? previousActiveTab : 'common');
+            } else {
+                showTab('by-profile');
             }
             hideMessages();
         } catch (fallbackError) {
@@ -990,7 +1073,7 @@ function handleExportCSV() {
     const rows = badges.map(badge => {
         const profile = badge._username || '';
         const name = badge.badge_template?.name || badge.name || '';
-        const issuer = badge.badge_template?.issuer_org_name || '';
+        const issuer = getBadgeIssuer(badge);
         const issuedAt = badge.issued_at ? new Date(badge.issued_at).toLocaleDateString() : '';
         const expiresAt = badge.expires_at ? new Date(badge.expires_at).toLocaleDateString() : '';
         const badgeUrl = badge.id ? `https://www.credly.com/badges/${badge.id}` : '';

@@ -55,7 +55,7 @@ app.use((req, res, next) => {
 });
 
 // Serve only the frontend assets — never server code, data files or repo metadata.
-const STATIC_FILES = ['index.html', 'style.css', 'script.js', 'predefined-profiles.js'];
+const STATIC_FILES = ['index.html', 'style.css', 'script.js', 'predefined-profiles.js', 'badge-utils.js'];
 for (const file of STATIC_FILES) {
     app.get('/' + file, (req, res) => res.sendFile(path.join(__dirname, file)));
 }

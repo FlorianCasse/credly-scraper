@@ -45,6 +45,17 @@
                             aria-label="Only show certifications issued after this date"
                         >
                     </div>
+                    <div class="input-group issuer-filter-group">
+                        <label for="filter-issuer">Filter by issuer <span class="label-hint">— leave empty to include all</span></label>
+                        <select
+                            id="filter-issuer"
+                            multiple
+                            size="4"
+                            disabled
+                            aria-describedby="filter-issuer-hint"
+                        ></select>
+                        <p id="filter-issuer-hint" class="filter-hint">Hold Cmd (Mac) or Ctrl (Windows/Linux) to multi-select.</p>
+                    </div>
                 </div>
 
 
@@ -95,6 +106,7 @@
             integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg=="
             crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="predefined-profiles.js"></script>
+    <script src="badge-utils.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
