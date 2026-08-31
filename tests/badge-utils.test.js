@@ -126,3 +126,34 @@ test('shouldClearIssuerFilter clears options only when a populated batch changes
     assert.strictEqual(badgeUtils.shouldClearIssuerFilter('batch-a', 'batch-a'), false);
     assert.strictEqual(badgeUtils.shouldClearIssuerFilter('', 'batch-b'), false);
 });
+
+test('chunkList splits a batch into ordered chunks', () => {
+    const { chunkList } = require('../badge-utils');
+
+    // exact multiple
+    assert.deepStrictEqual(chunkList([1, 2, 3, 4], 2), [[1, 2], [3, 4]]);
+    // remainder
+    assert.deepStrictEqual(chunkList([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+    // chunk larger than the list
+    assert.deepStrictEqual(chunkList([1, 2], 10), [[1, 2]]);
+    // nothing to chunk
+    assert.deepStrictEqual(chunkList([], 10), []);
+    assert.deepStrictEqual(chunkList(null, 10), []);
+});
+
+test('chunkList covers every item exactly once for a full-company batch', () => {
+    const { chunkList } = require('../badge-utils');
+    const usernames = Array.from({ length: 183 }, (_, i) => `user-${i}`);
+
+    const chunks = chunkList(usernames, 50);
+    assert.strictEqual(chunks.length, 4);
+    assert.ok(chunks.every(c => c.length <= 50));
+    assert.deepStrictEqual(chunks.flat(), usernames);
+});
+
+test('chunkList never produces empty chunks on a degenerate size', () => {
+    const { chunkList } = require('../badge-utils');
+
+    assert.deepStrictEqual(chunkList([1, 2], 0), [[1], [2]]);
+    assert.deepStrictEqual(chunkList([1, 2], -5), [[1], [2]]);
+});

@@ -39,10 +39,22 @@
         return Boolean(previousBatchKey && previousBatchKey !== nextBatchKey);
     }
 
+    // Splits a list into consecutive chunks of at most `size` items, preserving order.
+    function chunkList(items, size) {
+        if (!Array.isArray(items) || items.length === 0) return [];
+        const step = Math.max(1, Math.floor(size) || 0);
+        const chunks = [];
+        for (let i = 0; i < items.length; i += step) {
+            chunks.push(items.slice(i, i + step));
+        }
+        return chunks;
+    }
+
     return {
         getBadgeIssuer,
         collectIssuerNames,
         matchesIssuerFilter,
         shouldClearIssuerFilter,
+        chunkList,
     };
 }));
