@@ -28,6 +28,7 @@ Self-hosted on a dedicated server with an Express.js backend — no third-party 
 - **Automatic image processing** — Badges are resized and centred on a transparent canvas (512x254 px)
 - **Display names** — People are shown by their first and last name, not their username
 - **Server-side Credly proxy** — All API and image requests go through the backend with in-memory caching (1h for JSON, 24h for images)
+- **Chunked fetching** — Large selections are split into batches of 50 and streamed one after another, so a whole-company fetch stays inside the server's per-request cap; a chunk whose stream fails retries over POST without losing the others
 - **Image deduplication** — Shared badge images across profiles are fetched only once
 - **Responsive design** — Works on desktop and mobile
 
@@ -43,6 +44,8 @@ Browser  →  Nginx (:8080)  →  Express.js (:3002)  →  Credly API / CDN
 - **Frontend**: Static HTML/CSS/JS served by Express
 - **Backend API**:
   - `GET /api/credly?url=<credly-url>` — Cached proxy to Credly (supports www.credly.com and images.credly.com)
+  - `GET /api/batch-badges-stream?usernames=<a,b,c>` — Streams one profile per SSE event as it resolves (max 250 per request)
+  - `POST /api/batch-badges` — Same data in one response; the fallback used when a stream fails (max 250 per request)
   - `GET /api/profiles` — List custom profiles
   - `POST /api/profiles` — Add a profile (password-protected)
   - `DELETE /api/profiles` — Remove a profile (password-protected)

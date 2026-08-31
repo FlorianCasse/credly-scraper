@@ -212,7 +212,9 @@ function createConcurrencyLimiter(max) {
 }
 
 // --- Batch Badges Endpoint ---
-// Fetches profile info + all badges for multiple usernames in one request
+// Fetches profile info + all badges for multiple usernames in one request.
+// The frontend chunks large selections, so this cap is only a guard rail.
+const MAX_BATCH_SIZE = 250;
 
 function fetchUrl(url) {
     const cacheKey = url;
@@ -272,8 +274,8 @@ app.post('/api/batch-badges', async (req, res) => {
     if (!Array.isArray(usernames) || usernames.length === 0) {
         return res.status(400).json({ error: 'usernames array is required' });
     }
-    if (usernames.length > 100) {
-        return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    if (usernames.length > MAX_BATCH_SIZE) {
+        return res.status(400).json({ error: `Maximum ${MAX_BATCH_SIZE} usernames per batch` });
     }
 
     const limit = createConcurrencyLimiter(10);
@@ -303,7 +305,7 @@ app.get('/api/batch-badges-stream', (req, res) => {
 
     const usernames = raw.split(',').map(u => u.trim()).filter(Boolean);
     if (usernames.length === 0) return res.status(400).json({ error: 'No usernames provided' });
-    if (usernames.length > 100) return res.status(400).json({ error: 'Maximum 100 usernames per batch' });
+    if (usernames.length > MAX_BATCH_SIZE) return res.status(400).json({ error: `Maximum ${MAX_BATCH_SIZE} usernames per batch` });
 
     res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -475,4 +477,5 @@ module.exports = {
     getCached,
     setCache,
     getAllPredefinedUsernames,
+    MAX_BATCH_SIZE,
 };

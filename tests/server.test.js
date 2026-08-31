@@ -21,6 +21,7 @@ const {
     getCached,
     setCache,
     getAllPredefinedUsernames,
+    MAX_BATCH_SIZE,
 } = require('../server');
 
 // --- Unit tests: pure helpers ---
@@ -165,8 +166,48 @@ test('GET /api/credly validates its url parameter', async () => {
 test('POST /api/batch-badges validates its payload', async () => {
     assert.strictEqual((await req('/api/batch-badges', { method: 'POST', body: {} })).status, 400);
     assert.strictEqual((await req('/api/batch-badges', { method: 'POST', body: { usernames: [] } })).status, 400);
-    const tooMany = { usernames: Array.from({ length: 101 }, (_, i) => `u${i}`) };
+    const tooMany = { usernames: Array.from({ length: MAX_BATCH_SIZE + 1 }, (_, i) => `u${i}`) };
     assert.strictEqual((await req('/api/batch-badges', { method: 'POST', body: tooMany })).status, 400);
+});
+
+test('GET /api/batch-badges-stream validates its query parameter', async () => {
+    // No usernames at all, and a value that is empty once split, are both rejected
+    // before the SSE stream opens.
+    assert.strictEqual((await req('/api/batch-badges-stream')).status, 400);
+    assert.strictEqual((await req('/api/batch-badges-stream?usernames=')).status, 400);
+    assert.strictEqual((await req('/api/batch-badges-stream?usernames=' + encodeURIComponent(' , , '))).status, 400);
+
+    const tooMany = Array.from({ length: MAX_BATCH_SIZE + 1 }, (_, i) => `u${i}`).join(',');
+    assert.strictEqual((await req('/api/batch-badges-stream?usernames=' + encodeURIComponent(tooMany))).status, 400);
+});
+
+test('both batch endpoints report the same cap as a JSON error the client can surface', async () => {
+    // The frontend shows detail.error verbatim, so an over-cap rejection must
+    // carry a readable message naming the real limit — not just a bare 400.
+    const overCap = Array.from({ length: MAX_BATCH_SIZE + 1 }, (_, i) => `u${i}`);
+    const expected = `Maximum ${MAX_BATCH_SIZE} usernames per batch`;
+
+    const post = await req('/api/batch-badges', { method: 'POST', body: { usernames: overCap } });
+    assert.strictEqual((await post.json()).error, expected);
+
+    const stream = await req('/api/batch-badges-stream?usernames=' + encodeURIComponent(overCap.join(',')));
+    assert.strictEqual((await stream.json()).error, expected);
+});
+
+test('the frontend chunk size stays within the server batch cap', () => {
+    // Regression guard for the bug this endpoint pair was built around: the UI
+    // used to send every selected profile in one request and got a blanket 400.
+    // script.js runs in the browser and cannot be required, so read the constant.
+    const source = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
+    const match = source.match(/const BATCH_CHUNK_SIZE = (\d+);/);
+    assert.ok(match, 'script.js must declare BATCH_CHUNK_SIZE');
+
+    const chunkSize = Number(match[1]);
+    assert.ok(chunkSize > 0, 'chunk size must be positive');
+    assert.ok(
+        chunkSize <= MAX_BATCH_SIZE,
+        `BATCH_CHUNK_SIZE (${chunkSize}) must not exceed MAX_BATCH_SIZE (${MAX_BATCH_SIZE})`
+    );
 });
 
 test('profile CRUD: add, reject duplicates and bad input, remove', async () => {

@@ -13,7 +13,18 @@ const {
     collectIssuerNames,
     matchesIssuerFilter,
     shouldClearIssuerFilter,
+    chunkList,
 } = BadgeUtils;
+
+// Profiles fetched per request. A full-company selection is far more usernames
+// than fit comfortably in one SSE query string (or the server's batch cap), so
+// the batch is split into chunks that are fetched one after the other.
+const BATCH_CHUNK_SIZE = 50;
+
+// How long a stream may stay silent before we give up on it. This is an IDLE
+// timeout, reset on every profile received, so a slow-but-healthy chunk never
+// trips it -- only a connection that has genuinely stalled.
+const SSE_IDLE_TIMEOUT_MS = 30000;
 
 // Custom profiles from server API
 let cachedCustomProfiles = null;
@@ -732,6 +743,69 @@ async function renderOneProfile(username, displayName, rawBadges, container, key
 }
 
 // Handle fetch badges (SSE streaming)
+// Streams one chunk of usernames from the SSE endpoint, invoking `onResult` for
+// each profile as it arrives. Rejects when the stream dies before delivering
+// anything, so the caller can retry that chunk over the POST endpoint.
+function fetchChunkViaStream(chunk, onResult) {
+    return new Promise((resolve, reject) => {
+        const url = `/api/batch-badges-stream?usernames=${encodeURIComponent(chunk.join(','))}`;
+        const eventSource = new EventSource(url);
+        let received = 0;
+        let idleTimer = null;
+
+        const settle = (settleFn, value) => {
+            clearTimeout(idleTimer);
+            eventSource.close();
+            settleFn(value);
+        };
+
+        // Anything already delivered counts as partial success; only a stream
+        // that produced nothing falls through to the POST retry.
+        const giveUp = (error) => {
+            if (received === 0) settle(reject, error);
+            else settle(resolve);
+        };
+
+        const resetIdleTimer = () => {
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => giveUp(new Error('SSE stream timed out')), SSE_IDLE_TIMEOUT_MS);
+        };
+        resetIdleTimer();
+
+        eventSource.onmessage = (event) => {
+            resetIdleTimer();
+            let result;
+            try {
+                result = JSON.parse(event.data);
+            } catch {
+                console.warn('Skipping malformed SSE event:', event.data);
+                return;
+            }
+            received++;
+            onResult(result);
+        };
+
+        eventSource.addEventListener('done', () => settle(resolve));
+
+        eventSource.onerror = () => giveUp(new Error('SSE stream failed'));
+    });
+}
+
+// Fallback for a chunk whose stream failed: same usernames, plain POST.
+async function fetchChunkViaPost(chunk, onResult) {
+    const res = await fetch('/api/batch-badges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: chunk }),
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.error || `Batch fetch failed (HTTP ${res.status})`);
+    }
+    const batchResults = await res.json();
+    for (const result of batchResults) onResult(result);
+}
+
 async function handleFetchBadges(options = {}) {
     const preserveImageCache = options?.preserveImageCache === true;
     const preserveActiveTab = options?.preserveActiveTab === true;
@@ -770,13 +844,22 @@ async function handleFetchBadges(options = {}) {
     const lines = rawInput.split('\n').map(l => l.trim()).filter(Boolean);
 
     const usernames = [];
+    const seenUsernames = new Set();
     const invalidLines = [];
     for (const line of lines) {
+        let username;
         try {
-            usernames.push(extractUsername(line));
+            username = extractUsername(line);
         } catch {
             invalidLines.push(line);
+            continue;
         }
+        // Credly usernames are case-insensitive, and one person can appear in
+        // two country groups. Keep the first spelling and drop repeats.
+        const key = username.toLowerCase();
+        if (seenUsernames.has(key)) continue;
+        seenUsernames.add(key);
+        usernames.push(username);
     }
 
     if (usernames.length === 0) {
@@ -799,169 +882,130 @@ async function handleFetchBadges(options = {}) {
         showInfo(`${invalidLines.length} invalid URL(s) skipped. Fetching ${usernames.length} profile(s)...`);
     }
 
-    try {
-        setLoading(true);
-        resultsSection.style.display = 'block';
-        showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} from server...`);
+    setLoading(true);
+    resultsSection.style.display = 'block';
+    showInfo(`Fetching ${usernames.length} profile${usernames.length !== 1 ? 's' : ''} from server...`);
 
-        const imageLimit = createConcurrencyLimiter(10);
+    const imageLimit = createConcurrencyLimiter(10);
 
-        // Pre-create one container div per profile to preserve display order
-        const profileContainers = {};
-        for (const username of usernames) {
-            const div = document.createElement('div');
-            badgesGrid.appendChild(div);
-            profileContainers[username] = div;
+    // Pre-create one container div per profile to preserve display order, even
+    // though results arrive out of order and across several chunked requests.
+    // Null-prototype so this stays a plain lookup table: a profile named
+    // "__proto__" would otherwise rewrite the object's prototype on assignment.
+    const profileContainers = Object.create(null);
+    for (const username of usernames) {
+        const div = document.createElement('div');
+        badgesGrid.appendChild(div);
+        profileContainers[username] = div;
+    }
+
+    const showProfileError = (container, message) => {
+        if (!container) return;
+        const errHeader = document.createElement('div');
+        errHeader.className = 'profile-header profile-header--error';
+        errHeader.textContent = message;
+        container.appendChild(errHeader);
+    };
+
+    // Track render promises to wait for all images
+    const renderPromises = [];
+    const receivedUsernames = new Set();
+    let profilesReceived = 0;
+
+    // Renders one profile payload, whichever endpoint delivered it.
+    const handleProfileResult = (result) => {
+        receivedUsernames.add(result.username);
+        profilesReceived++;
+        showInfo(`Received ${profilesReceived}/${usernames.length} profiles...`);
+
+        const container = profileContainers[result.username];
+        if (!container) return;
+
+        if (result.error) {
+            showProfileError(container, `${result.username} — Failed: ${result.error}`);
+            return;
         }
 
-        // Track render promises to wait for all images
-        const renderPromises = [];
-        let profilesReceived = 0;
+        const rawBadges = Array.isArray(result.badges) ? result.badges : [];
+        rawBadgesForBatch.push(...rawBadges);
 
-        // Stream profiles via SSE
-        await new Promise((resolve, reject) => {
-            const url = `/api/batch-badges-stream?usernames=${encodeURIComponent(usernames.join(','))}`;
-            const eventSource = new EventSource(url);
-
-            eventSource.onmessage = (event) => {
-                let result;
-                try {
-                    result = JSON.parse(event.data);
-                } catch {
-                    console.warn('Skipping malformed SSE event:', event.data);
-                    return;
-                }
-                profilesReceived++;
-                showInfo(`Received ${profilesReceived}/${usernames.length} profiles...`);
-
-                const container = profileContainers[result.username];
-                if (!container) return;
-
-                if (result.error) {
-                    const errHeader = document.createElement('div');
-                    errHeader.className = 'profile-header profile-header--error';
-                    errHeader.textContent = `${result.username} — Failed: ${result.error}`;
-                    container.appendChild(errHeader);
-                    return;
-                }
-
-                const rawBadges = Array.isArray(result.badges) ? result.badges : [];
-                rawBadgesForBatch.push(...rawBadges);
-
-                const promise = renderOneProfile(
-                    result.username, result.displayName, rawBadges,
-                    container,
-                    keyword, filterDate, selectedIssuers,
-                    targetWidth, targetHeight,
-                    imageLimit
-                ).then(() => {
-                    tabsDirty = true;
-                    badgeCount.textContent = `(${badges.length})`;
-
-                    // Show tabs as soon as 2+ profiles have results
-                    const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
-                    if (distinctProfiles >= 2 && resultsTabsEl.style.display !== 'flex') {
-                        resultsTabsEl.style.display = 'flex';
-                        showTab(preserveActiveTab ? previousActiveTab : 'common');
-                    }
-                }).catch(err => {
-                    const errHeader = document.createElement('div');
-                    errHeader.className = 'profile-header profile-header--error';
-                    errHeader.textContent = `${result.username} — Failed: ${err.message}`;
-                    container.appendChild(errHeader);
-                });
-                renderPromises.push(promise);
-            };
-
-            eventSource.addEventListener('done', () => {
-                eventSource.close();
-                resolve();
-            });
-
-            eventSource.onerror = () => {
-                eventSource.close();
-                // If we received nothing, fall back to POST endpoint
-                if (profilesReceived === 0) {
-                    reject(new Error('SSE stream failed'));
-                } else {
-                    resolve(); // partial success
-                }
-            };
-        });
-
-        // Wait for all in-flight image renders to complete
-        await Promise.allSettled(renderPromises);
-        rebuildIssuerFilter(rawBadgesForBatch, selectedIssuers, batchKey);
-
-        badgeCount.textContent = `(${badges.length})`;
-
-        // Final tab state: show tabs if 2+ profiles, and re-render active tab
-        const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
-        if (distinctProfiles >= 2) {
+        const promise = renderOneProfile(
+            result.username, result.displayName, rawBadges,
+            container,
+            keyword, filterDate, selectedIssuers,
+            targetWidth, targetHeight,
+            imageLimit
+        ).then(() => {
             tabsDirty = true;
-            resultsTabsEl.style.display = 'flex';
-            if (preserveActiveTab) {
-                showTab(previousActiveTab);
-            } else {
-                const activeTab = getActiveTab();
-                showTab(activeTab === 'by-profile' ? 'common' : activeTab);
-            }
-        } else {
-            showTab('by-profile');
-        }
-
-        hideMessages();
-        setLoading(false);
-
-    } catch (error) {
-        // Fallback to POST batch endpoint
-        try {
-            badgesGrid.innerHTML = '';
-            rawBadgesForBatch.length = 0;
-            const imageLimit = createConcurrencyLimiter(10);
-            const res = await fetch('/api/batch-badges', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ usernames }),
-            });
-            if (!res.ok) throw new Error('Batch fetch failed');
-            const batchResults = await res.json();
-
-            for (const result of batchResults) {
-                const container = document.createElement('div');
-                badgesGrid.appendChild(container);
-                if (result.error) {
-                    const errHeader = document.createElement('div');
-                    errHeader.className = 'profile-header profile-header--error';
-                    errHeader.textContent = `${result.username} — Failed: ${result.error}`;
-                    container.appendChild(errHeader);
-                    continue;
-                }
-                const rawBadges = Array.isArray(result.badges) ? result.badges : [];
-                rawBadgesForBatch.push(...rawBadges);
-                await renderOneProfile(
-                    result.username, result.displayName, rawBadges,
-                    container, keyword, filterDate, selectedIssuers,
-                    targetWidth, targetHeight, imageLimit
-                );
-            }
-
-            rebuildIssuerFilter(rawBadgesForBatch, selectedIssuers, batchKey);
             badgeCount.textContent = `(${badges.length})`;
+
+            // Show tabs as soon as 2+ profiles have results
             const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
-            if (distinctProfiles >= 2) {
-                tabsDirty = true;
+            if (distinctProfiles >= 2 && resultsTabsEl.style.display !== 'flex') {
                 resultsTabsEl.style.display = 'flex';
                 showTab(preserveActiveTab ? previousActiveTab : 'common');
-            } else {
-                showTab('by-profile');
             }
-            hideMessages();
-        } catch (fallbackError) {
-            showError(fallbackError.message);
+        }).catch(err => {
+            showProfileError(container, `${result.username} — Failed: ${err.message}`);
+        });
+        renderPromises.push(promise);
+    };
+
+    // Fetch chunk by chunk. A whole-company selection is more usernames than fit
+    // in one SSE query string, and one failing chunk must not sink the others.
+    const failureReasons = new Map();
+    for (const chunk of chunkList(usernames, BATCH_CHUNK_SIZE)) {
+        try {
+            await fetchChunkViaStream(chunk, handleProfileResult);
+        } catch {
+            try {
+                await fetchChunkViaPost(chunk, handleProfileResult);
+            } catch (postError) {
+                // Attribute the failure to this chunk only -- a later chunk can
+                // fail for an entirely different reason.
+                for (const username of chunk) failureReasons.set(username, postError.message);
+            }
         }
-        setLoading(false);
     }
+
+    // Any profile the server never returned gets its own error line rather than
+    // an empty slot. Covers both a chunk that failed outright and a stream that
+    // died after delivering only part of its chunk.
+    const missing = usernames.filter(username => !receivedUsernames.has(username));
+    const reasonFor = (username) => failureReasons.get(username) || 'no response from server';
+    for (const username of missing) {
+        showProfileError(profileContainers[username], `${username} — Failed: ${reasonFor(username)}`);
+    }
+
+    // Wait for all in-flight image renders to complete
+    await Promise.allSettled(renderPromises);
+    rebuildIssuerFilter(rawBadgesForBatch, selectedIssuers, batchKey);
+
+    badgeCount.textContent = `(${badges.length})`;
+
+    // Final tab state: show tabs if 2+ profiles, and re-render active tab
+    const distinctProfiles = new Set(badges.map(b => b._username).filter(Boolean)).size;
+    if (distinctProfiles >= 2) {
+        tabsDirty = true;
+        resultsTabsEl.style.display = 'flex';
+        if (preserveActiveTab) {
+            showTab(previousActiveTab);
+        } else {
+            const activeTab = getActiveTab();
+            showTab(activeTab === 'by-profile' ? 'common' : activeTab);
+        }
+    } else {
+        showTab('by-profile');
+    }
+
+    if (missing.length > 0) {
+        const distinctReasons = [...new Set(missing.map(reasonFor))];
+        const summary = distinctReasons.length === 1 ? distinctReasons[0] : distinctReasons.join('; ');
+        showError(`${missing.length} profile(s) could not be fetched: ${summary}`);
+    } else {
+        hideMessages();
+    }
+    setLoading(false);
 }
 
 // Download single badge
@@ -1225,6 +1269,7 @@ async function initQuickSelect() {
 // Ctrl+Enter (or Cmd+Enter on Mac) triggers fetch from the textarea
 profileUrlInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        if (fetchBtn.disabled) return; // a fetch is already in flight
         handleFetchBadges();
     }
 });
