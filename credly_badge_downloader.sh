@@ -234,6 +234,13 @@ main() {
 
     # Extract username
     local username=$(extract_username "$profile_url")
+
+    # Validate username to prevent path traversal
+    if [[ ! "$username" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+        print_error "Invalid username: contains forbidden characters"
+        exit 1
+    fi
+
     print_info "Username: $username"
     echo ""
 
