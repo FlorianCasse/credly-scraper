@@ -35,6 +35,7 @@
             'https://www.credly.com/users/andy-ayite-zonor',
             'https://www.credly.com/users/igor-jemuce',
             'https://www.credly.com/users/jan-horrix',
+            'https://www.credly.com/users/jeroen-christiaen',
             'https://www.credly.com/users/kevin-burgers',
             'https://www.credly.com/users/michael-van-de-gaer',
             'https://www.credly.com/users/michielpeene',
