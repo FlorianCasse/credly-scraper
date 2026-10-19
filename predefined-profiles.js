@@ -109,6 +109,7 @@
             'https://www.credly.com/users/mattheus-van-der-wal',
             'https://www.credly.com/users/richard-van-dantzig',
             'https://www.credly.com/users/wesley-van-ede',
+            'https://www.credly.com/users/jeroen-christiaen',
         ],
         'Nordics': [
             'https://www.credly.com/users/paul-john-mcconnon',
