@@ -35,6 +35,7 @@
             'https://www.credly.com/users/andy-ayite-zonor',
             'https://www.credly.com/users/igor-jemuce',
             'https://www.credly.com/users/jan-horrix',
+            'https://www.credly.com/users/jeroen-christiaen',
             'https://www.credly.com/users/kevin-burgers',
             'https://www.credly.com/users/michael-van-de-gaer',
             'https://www.credly.com/users/michielpeene',
@@ -109,7 +110,6 @@
             'https://www.credly.com/users/mattheus-van-der-wal',
             'https://www.credly.com/users/richard-van-dantzig',
             'https://www.credly.com/users/wesley-van-ede',
-            'https://www.credly.com/users/jeroen-christiaen',
         ],
         'Nordics': [
             'https://www.credly.com/users/paul-john-mcconnon',
